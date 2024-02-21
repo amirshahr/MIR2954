@@ -1,0 +1,22 @@
+
+```{r}
+# Initialize a vector with miRNA name, its seed sequence, and an identifier.
+seed_seq <- c("gg-mir-2954", "AUCCCCA", "9031")
+
+# Combine the elements into a single string with tab separation.
+seed_seq_line <- paste(seed_seq, collapse = "\t")
+
+# Specify the file path where the seed sequence will be saved.
+file_path <- "/home/amir/miR-2954/mir_2954_target_prediction/mir_2954_seed.txt"
+
+# Write the combined string to the specified file path.
+cat(seed_seq_line, file = file_path, sep = "\n")
+
+```
+
+# Read the fasta file
+fasta_file <- readDNAStringSet("~/miR-2954/mir_2954_target_prediction/GRCG7b_3UTR_BioMart.txt", format = "fasta")
+
+# Remove sequences with "SNCNAVAAB"
+fasta_file <- fasta_file[!grepl("SNCNAVAAB", fasta_file)]
+fasta_file
