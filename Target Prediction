@@ -1,22 +1,46 @@
 
+#Prepare the seed file
+
 ```{r}
-# Initialize a vector with miRNA name, its seed sequence, and an identifier.
 seed_seq <- c("gg-mir-2954", "AUCCCCA", "9031")
 
-# Combine the elements into a single string with tab separation.
 seed_seq_line <- paste(seed_seq, collapse = "\t")
 
-# Specify the file path where the seed sequence will be saved.
 file_path <- "/home/amir/miR-2954/mir_2954_target_prediction/mir_2954_seed.txt"
-
-# Write the combined string to the specified file path.
 cat(seed_seq_line, file = file_path, sep = "\n")
 
 ```
 
-# Read the fasta file
-fasta_file <- readDNAStringSet("~/miR-2954/mir_2954_target_prediction/GRCG7b_3UTR_BioMart.txt", format = "fasta")
+#clean up and make the 3UTR (downloaded BioMart ENSEMBL)file ready for TargetScan
 
-# Remove sequences with "SNCNAVAAB"
-fasta_file <- fasta_file[!grepl("SNCNAVAAB", fasta_file)]
-fasta_file
+```{r}
+library(Biostrings)
+library(tidyverse)
+
+# Read the fasta file
+fasta_file <- readDNAStringSet(file ="~/miR-2954/mir_2954_target_prediction/GRCG7b_3UTR_BioMart.txt", format = "fasta")
+
+# Convert the DNAStringSet object to a data.frame
+UTR3_DNA <- data.frame(id = names(fasta_file), sequence = as.character(fasta_file), stringsAsFactors = FALSE)
+UTR3_DNA$organism <- "9031"
+UTR3_DNA <- UTR3_DNA %>% 
+rownames_to_column(var = "ID") %>% 
+  select(id,organism, sequence) %>%
+  mutate(id = str_replace(id, "\\|" , "_"))
+UTR3_DNA 
+
+write.table(UTR3_DNA, "/home/amir/miR-2954/mir_2954_target_prediction/GRCG7b_DNA_3UTR_for_TragetScan.txt", sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
+
+```
+
+Identifying targets using TargetScan 70 
+```{bash}
+#(base) amir@kaessmannserver:~/miR-2954/mir_2954_target_prediction$ ./targetscan_70.pl ./mir_2954_seed.txt ./GRCG7b_DNA_3UTR_for_TargetsScan.txt ./miR-2954_predicted_targets_DNA_UTR.txt 
+```
+
+Read the output file
+```{r}
+all_targets_file <- read.delim("/home/amir/miR-2954/mir_2954_target_prediction/miR-2954_predicted_targets_DNA_UTR.txt")
+all_targets_file
+```
+
