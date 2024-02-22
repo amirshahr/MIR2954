@@ -1,0 +1,49 @@
+
+#Prepare Ohnolog list
+#This R script processes a list of ohnolog gene pairs from the chicken genome (Gallus gallus, abbreviated as "gal6") and generates a list of unique Ohnolog gene IDs.
+
+```{r}
+require(tidyverse)
+# Read the data
+chick_ohno <- read_delim("~/miR-2954/Human_Ohno_DoseSensitive_list/ggallus.Pairs.Relaxed.2R.txt")
+
+# Prepare ohno pairs
+ohno_p1 <- chick_ohno %>%
+  dplyr::select(Ohno1, Symbol1) %>%
+  dplyr::rename(gal6_gene_id = Ohno1, gene_name_ohno = Symbol1)
+
+ohno_p2 <- chick_ohno %>%
+  dplyr::select(Ohno2, Symbol2) %>%
+  dplyr::rename(gal6_gene_id = Ohno2, gene_name_ohno = Symbol2)
+
+# Merge and get distinct pairs
+distinct_ohno <- dplyr::bind_rows(ohno_p1, ohno_p2) %>%
+  dplyr::distinct_all() %>%
+  mutate(if_ohno = "ohno")
+
+# Save the gene IDs to a text file
+write.table(distinct_ohno$gal6_gene_id, "~/miR-2954/gene_id_conversion_PC/ohno_list.txt", row.names = FALSE, col.names = FALSE, quote = FALSE)
+
+length(unique(distinct_ohno$gal6_gene_id))
+
+```
+
+The command subsets sequences of gal6 Ohnolog genes from the FASTA file of protein-coding genes, based on the list of Ohnolog gene IDs
+```{bash}
+awk -F'|' 'NR==FNR {genes[$1]; next} /^>/ {f=(substr($1,2) in genes)} f' ~/miR-2954/gene_id_conversion_PC/ohno_list.txt ~/miR-2954/gene_id_conversion_PC/biomart_gal6_protein_coding_gene_seq.txt > ~/miR-2954/gene_id_conversion_PC/biomart_gal6_ohno_subset_gene_seq.txt
+
+```
+Keep Ohnolog genes that are not deprecated in Galgal6
+```{bash}
+awk -F'|' 'NR==FNR {genes[$1]=1; next} /^>/ {if ((substr($1,2) in genes)) genes[substr($1,2)]=0} END {for (i in genes) if (genes[i]) print i}' ~/miR-2954/gene_id_conversion_PC/ohno_list.txt ~/miR-2954/gene_id_conversion_PC/biomart_gal6_protein_coding_gene_seq.txt
+```
+
+#Perform a BLASTN search to calculate pairwise sequence similarities between two sets of genes: ohnolog sequences from Gallus gallus (gal6) and protein-coding gene sequences from Gallus gallus genome (gal7). 
+```{bash}
+blastn -query ~/miR-2954/gene_id_conversion_PC/biomart_gal6_ohno_subset_gene_seq.txt -subject ~/miR-2954/gene_id_conversion_PC/biomart_gal7_protein_coding_gene_seq.txt  -out ~/miR-2954/gene_id_conversion_PC/blastn_gal6_ohno_genes_to_gal7_protein_coding_genes.txt -outfmt 6 -perc_identity 95 -evalue 0.001 
+```
+
+
+
+
+
