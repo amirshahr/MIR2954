@@ -1,5 +1,5 @@
 
-Makeing the seed file
+Making a file containing the seed sequence of MIR2945
 
 ```{r}
 seed_seq <- c("gg-mir-2954", "AUCCCCA", "9031")
@@ -8,7 +8,8 @@ file_path <- "/home/amir/miR-2954/mir_2954_target_prediction/mir_2954_seed.txt"
 cat(seed_seq_line, file = file_path, sep = "\n")
 ```
 
-#clean up and make the 3UTR (downloaded BioMart ENSEMBL)file ready for TargetScan
+#clean up and prepare the 3UTR (downloaded BioMart ENSEMBL) file for TargetScan. 
+
 ```{r}
 library(Biostrings)
 library(tidyverse)
