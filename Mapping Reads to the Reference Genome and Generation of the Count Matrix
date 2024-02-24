@@ -243,7 +243,38 @@ all(row.names(filtered_sample_annotation) == colnames(all_raw_counts ))
 saveRDS(filtered_sample_annotation, file = "~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/data_analysis/mir_2954_microRNA_seq_sample_annotation.rds")
 
 ```
+Make a deseq2 object
 
+```{r}
+all_raw_counts <- read_csv("~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/data_analysis/mir_2954_microRNA_seq_count_matrix.csv")  %>% 
+  rename_all(~str_replace(., "-", "_")) %>%
+  rename_all(~tolower(.)) %>%
+  column_to_rownames(var="gene_id")
+
+sample_annotation <- readRDS(file = "~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/data_analysis/mir_2954_microRNA_seq_sample_annotation.rds")
+
+sample_annotation
+
+all(row.names(sample_annotation) == colnames(all_raw_counts))
+
+```
+
+```{r}
+library(DESeq2)
+
+DeSeq2_mir <- DESeqDataSetFromMatrix(countData = all_raw_counts,
+                              colData = sample_annotation,
+                              design = ~ genotype)
+
+DeSeq2_mir
+
+
+#Sorting the DESeq2 object to be able to merge it with genomic ranges 
+
+DeSeq2_mir<- DeSeq2_mir[order(rownames(DeSeq2_mir)),]
+
+saveRDS(DeSeq2_mir, file= "~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/data_analysis/mir_2954_microRNA_DeSeq2.rds")
+```
 
 
 
