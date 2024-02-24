@@ -15,7 +15,7 @@ STAR \
 ```
 
 
-Mapp reads and count
+Map reads and count
 
 ```{bash}
 
@@ -114,8 +114,7 @@ STAR --genomeDir ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/STAR_in
 ```
 
 
-
-lets loop and repeat to run the star and save the output
+loop to run the STAR on all files and save the output
 ```{bash}
 #!/bin/bash
 
@@ -154,7 +153,6 @@ done
 
 
 ```
-
 Getting a list of every files 
 ```{r}
 getwd()
@@ -179,7 +177,6 @@ all_files
 ```
 
 
-
 ```{r}
 
 #making a function to read the count matrix output of STAR pipeline 
@@ -196,9 +193,6 @@ read_genecount_output ("/home/amir/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bu
   
 ```
 
-
-
-
 ```{r}
 library(tidyverse)
 all_read_files <-  lapply(all_files, read_genecount_output) # 
@@ -210,7 +204,6 @@ microRNA_count_matrix
 write.csv(microRNA_count_matrix, file = "~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/data_analysis/mir_2954_microRNA_seq_count_matrix.csv", row.names = FALSE)
 
 count_matrix <- read_csv("~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/data_analysis/mir_2954_microRNA_seq_count_matrix.csv")
-
 
 
 count_matrix
