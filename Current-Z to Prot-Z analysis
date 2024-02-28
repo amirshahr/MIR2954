@@ -1,0 +1,376 @@
+---
+title: "Current-Z to Prot-Z analysis"
+author: "Leticia"
+date: "26/02/2024"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+    code_folding: hide
+    toc_depth: 3
+---
+
+```{r}
+library(readr)
+library(tidyverse)
+library(ggplot2)
+library(rstatix)
+library(ggpubr)
+
+out_dir <- "/work/leticia/kss/Amirs_project/Current_to_Ancestral/new_res/"
+
+if (!file.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE)
+} 
+```
+
+
+# Loading data
+
+Loading RPKM and metadata from all species.
+
+## RPKM
+
+Mouse RPKM tables can be downloaded here: https://heibox.uni-heidelberg.de/d/34ace5842ae34f798277/.
+
+```{r, warning=F}
+# Loading data from outgroup species (in this case mouse)
+dir <- "/work/leticia/kss/R_analyses/280622_SB_repo/Sex_bias_manuscript/RPKM/"
+
+path_names <- list.files(path = dir , pattern = ".txt",
+           full.names = T)
+file_names <- list.files(path = dir , pattern = ".txt",
+           full.names = F)
+file_names <- gsub("110122_", "", file_names)
+file_names <- gsub("_rpkm_all_genes.txt", "", file_names)
+
+all_expr <- lapply(path_names, function(x){
+  file <-read.csv(x, sep=" ")
+  rownames(file) <- file$Names
+  file <- file[, !colnames(file) %in% c("Names")]
+  #log2 transformation
+  file <- log2(file+1)
+  return(file)
+})
+names(all_expr) <- file_names
+
+# Loading chicken data
+chicken_rpkm <-read.csv("/work/leticia/kss/Amirs_project/data/RPKM/Chicken_rpkm_Amir.txt", sep="\t")
+chicken_expr <- log2(chicken_rpkm+1)
+
+all_expr[["Chicken"]] <- chicken_expr
+```
+
+## Metadata
+
+Mouse metadata tables are found here: https://github.com/Leticia314/Sex_bias_manuscript/tree/main/Metadata
+
+```{r, warning=F}
+# Loading data from outgroup species (in this case mouse)
+dir_meta <- "/work/leticia/kss/R_analyses/280622_SB_repo/Sex_bias_manuscript/Metadata/"
+
+path_names <- list.files(path = dir_meta , pattern = ".csv",
+           full.names = T)
+file_names <- list.files(path = dir_meta , pattern = ".csv",
+           full.names = F)
+file_names <- gsub(".sampleTable.csv", "", file_names)
+
+all_meta<- lapply(path_names, function(x){
+  file <-read.csv(x, sep=",")
+  return(file)
+})
+names(all_meta) <- file_names
+
+# Loading data from chicken
+chicken_meta <- read_delim("/work/leticia/kss/Amirs_project/data/Metadata/Chicken_metadata.txt", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+
+all_meta[["Chicken"]]<- chicken_meta
+```
+
+## Ortholog table
+
+Loading mouse-chicken 1:1 orthologs.
+
+```{r, warning=F}
+ortho_table <- read_delim("/work/leticia/kss/Amirs_project/data/Ortho/Chicken_2_Mouse_ortho.txt", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+
+# Removing mitochondrial genes
+ortho_table <- subset(ortho_table, !chromosome_name %in% c("MT") & !mmusculus_homolog_chromosome %in% c("MT") )
+
+# Removing type of orthology column
+ortho_table <- ortho_table[, !colnames(ortho_table) %in% colnames(ortho_table)[c(5)]]
+
+colnames (ortho_table) <- c("Chicken_ensembl", "Chicken_gene", "Chicken_chr", "Mouse_ensembl","Mouse_chr")
+
+# Removing genes on scaffolds (we're not sure if they are located on sex chromosomes or not)
+ortho_table <- subset(ortho_table, !Chicken_chr %in% c("JAENSK010000448.1", "JAENSK010000588.1", "JAENSK010000622.1", "JAENSK010000635.1", "JAENSK010000656.1",        "MU179271.1" ,       "MU179274.1", "JAENSK010000620.1","JAENSK010000082.1", "JAENSK010000452.1", "JAENSK010000479.1", "JAENSK010000594.1", "JAENSK010000615.1","JAENSK010000001.1", "JAENSK010000033.1", "JAENSK010000296.1", "MU179262.1",        "JAENSK010000605.1", "JAENSK010000595.1", "JAENSK010000587.1","JAENSK010000631.1", "MU179264.1", "JAENSK010000483.1", "MU179259.1" ,"JAENSK010000625.1", "JAENSK010000586.1", "JAENSK010000568.1","JAENSK010000593.1", "MU179258.1", "JAENSK010000650.1", "JAENSK010000665.1", "JAENSK010000592.1", "MU179261.1",        "JAENSK010000669.1", "JAENSK010000584.1", "MU179273.1", "MU179272.1", "JAENSK010000589.1", "JAENSK010000484.1","JAENSK010000640.1", "JAENSK010000002.1", "JAENSK010000623.1", "JAENSK010000585.1","MU179263.1" ,"MU179279.1", "MU179278.1") )
+
+# Creating ortho table where the 1:1 genes in outgroup species are autosomal
+all_ortho_tables <- list()
+
+all_ortho_tables[["Chicken"]] <- subset(ortho_table, !Mouse_chr %in% c("X", "Y")  )
+```
+
+## Targets
+
+Loading metadata with mir-2954 targets.
+
+```{r, warning=F}
+# Loading info on chicken genes
+chicken_genes <- readRDS("/work/leticia/kss/amir/miR-2954/mir_2954_target_prediction/GRCg7b_gtf_all_target_sites_integrated_human_ortho_chickOhno_DosSensitivity_Zebra.rds")
+
+# Subsetting Z-linked targets, Z-linked non-targets, and non-target autosomes
+targets_6_8_Zchr <-subset(chicken_genes, expr_targets=="exp_target" & chr_z_or_auto=="Z-linked" & gene_biotype=="protein_coding")
+non_targets_6_8_Zchr <-subset(chicken_genes, mir_targets_6_8=="not_target" & expr_targets=="not_exp_target" & chr_z_or_auto=="Z-linked"& gene_biotype=="protein_coding")
+autosomes <-subset(chicken_genes, mir_targets_6_8=="not_target" & expr_targets=="not_exp_target" & chr_z_or_auto=="Autosomal"& gene_biotype=="protein_coding")
+
+# Adding to orthology tables
+targets_6_8_Zchr <- left_join(targets_6_8_Zchr, ortho_table, by=c("gene_id"="Chicken_ensembl"))
+non_targets_6_8_Zchr <-left_join(non_targets_6_8_Zchr, ortho_table, by=c("gene_id"="Chicken_ensembl"))
+autosomes <-left_join(autosomes, ortho_table, by=c("gene_id"="Chicken_ensembl"))
+```
+
+
+# Analysis
+
+## Current Z to Auto
+
+Here, we calculate current-Z to autosome ratios for Z-linked targets and non-targets of mir-2954.
+
+```{r, warning=F}
+species <- c("Chicken")
+
+tissues <- c("Brain", "Cerebellum", "Heart", "Kidney", "Liver")
+
+stages <- c(Mouse="P63", Chicken="P155")
+
+hom_sex_chr <- c(Mouse="X", Chicken="Z")
+
+het_sex_chr <- list(Mouse=c("X", "Y"), Chicken=c("Z", "W"))
+
+# Current expression table
+all_current <- list()
+
+for (sp in species){
+  expr_sp <- all_expr[[sp]]
+  meta_sp <- all_meta[[sp]]
+  hom_sex_chr_sp <- hom_sex_chr[sp][[1]]
+  het_sex_chr_sp <- het_sex_chr[sp][[1]]
+  stage_sp <- stages[sp][[1]]
+  ortho_table_sp <- all_ortho_tables[[sp]]
+  
+  # Getting tissues and stages
+  meta_sp_allts_st <- subset(meta_sp, tissue %in% tissues & group==stage_sp)
+  
+  # Z genes
+  sex_genes <- ortho_table_sp[[paste0(sp,"_ensembl")]][ortho_table_sp[[paste0(sp,"_chr")]]==hom_sex_chr_sp]
+  
+  # Autosomal genes
+  auto_genes <- ortho_table_sp[[paste0(sp,"_ensembl")]][!ortho_table_sp[[paste0(sp,"_chr")]] %in% het_sex_chr_sp]
+  
+  # Subsetting expression data
+  expr_sp_ts_st <- expr_sp[, meta_sp_allts_st$id]
+    
+  # Transforming to long format and adding class
+  expr_sp_ts_st %>% rownames_to_column(var="gene_id")%>% 
+                    pivot_longer(cols=colnames(expr_sp_ts_st),
+                      names_to='sample_id',
+                      values_to='expr') %>%
+                      left_join(meta_sp_allts_st[, c("id", "tissue", "sex")], by=c("sample_id"="id")) %>%
+                      mutate(chr= case_when(
+                                  gene_id %in% sex_genes & gene_id %in% targets_6_8_Zchr$gene_id ~ "Z_linked_target",
+                                  gene_id %in% sex_genes & gene_id %in% non_targets_6_8_Zchr$gene_id ~ "Z_linked_non_target", 
+                                  gene_id %in% auto_genes & gene_id %in% autosomes$gene_id ~ "Auto"))-> expr_sp_ts_st_long
+    
+  # Calculating median per sex in each gene, and tissue and store in all_current
+  cur_med_per_ts_sex_g<- expr_sp_ts_st_long %>%
+      group_by(gene_id, tissue, sex, chr) %>%
+      summarise(med_expr_sex = median(expr)) %>% 
+      group_by(gene_id)%>%
+      # Removing genes that are not in our lists of autosomal or sex-linked genes, or that are not expressed in at least one sex
+      filter(!any(med_expr_sex==0) & !is.na(chr))
+    
+  all_current[[sp]] <- cur_med_per_ts_sex_g
+}
+```
+
+
+## Proto-Z to Proto-Auto
+
+Here, we calculate ancestral-Z to autosome ratios for Z-linked targets and non-targets of mir-2954. Ancestral expression levels of Z-linked genes (proto-Z genes) were estimated by calculating the median expression levels of the corresponding expressed autosomal 1∶1 orthologs in an outgroup species with non-ZW sex chromosomes (in this case mouse). In a similar way, ancestral expression levels of autosomal genes (proto-autosomal genes) were estimated by calculating the median expression levels of corresponding 1∶1 orthologs that are autosomal in the same outgroup species with non-ZW sex chromosomes.
+
+```{r, warning=F}
+species <- c("Chicken")
+
+orth_species <- list(Mouse=c("Chicken"), Chicken=c("Mouse"))
+
+tissues <- c("Brain", "Cerebellum", "Heart", "Kidney", "Liver")
+
+stages <- c(Mouse="P63", Rat="P112", Rabbit="216", Opossum="134", Chicken="P155")
+
+hom_sex_chr <- c(Mouse="X", Chicken="Z")
+
+het_sex_chr <- list(Mouse=c("X", "Y"), Chicken=c("Z", "W"))
+
+proto_table <-list()
+
+# Proto expression table
+all_proto <- list()
+
+for (sp in species){
+  orth_species_sp <- orth_species[[sp]]
+  ortho_table_sp <- all_ortho_tables[[sp]]
+  hom_sex_chr_sp <- hom_sex_chr[sp][[1]]
+  het_sex_chr_sp <- het_sex_chr[sp][[1]]
+  
+  # Z(X) genes
+  sex_genes <- ortho_table_sp[ortho_table_sp[[paste0(sp,"_chr")]]==hom_sex_chr_sp,]
+  
+  # Autosomal genes
+  auto_genes <- ortho_table_sp[!ortho_table_sp[[paste0(sp,"_chr")]] %in% het_sex_chr_sp,]
+  
+  all_out_expr_long <- list()
+  
+  for (o_sp in orth_species_sp){
+    expr_sp <- all_expr[[o_sp]]
+    meta_sp <- all_meta[[o_sp]]
+
+    stage_sp <- stages[o_sp][[1]]
+    
+    # Getting data from selected tissues and stage for the outgroup sp
+    meta_sp_allts_st <- subset(meta_sp, tissue %in% tissues & group==stage_sp)
+    
+    # 1:1 ortho of sex genes in outgroup sp
+    sex_genes_osp <- sex_genes[[paste0(o_sp,"_ensembl")]]
+    # 1:1 ortho of auto genes in outgroup sp
+    auto_genes_osp <- auto_genes[[paste0(o_sp,"_ensembl")]]
+    
+    # Expression table filtered in outgroup sp
+    expr_sp_allts_st <- expr_sp[, as.character(meta_sp_allts_st$id)]
+    
+    # Long format (Filtering sex genes and autosomes)
+    expr_sp_allts_st[c(sex_genes_osp, auto_genes_osp),] %>% rownames_to_column(var="gene_id")%>% 
+                    # Adding the gene id of the target species
+                    mutate(targ_gene= c(sex_genes[[paste0(sp,"_ensembl")]], auto_genes[[paste0(sp,"_ensembl")]])) %>%
+                    pivot_longer(cols=colnames(expr_sp_allts_st),
+                      names_to='sample_id',
+                      values_to='expr') %>%
+                      left_join(meta_sp_allts_st[, c("id", "tissue", "sex")], by=c("sample_id"="id"))%>%
+                      mutate(chr= case_when(
+                                  gene_id %in% sex_genes_osp & gene_id %in% targets_6_8_Zchr[[paste0(o_sp, "_ensembl")]]  ~ "Z_linked_target",
+                                  gene_id %in% sex_genes_osp & gene_id %in% non_targets_6_8_Zchr[[paste0(o_sp, "_ensembl")]] ~ "Z_linked_non_target", 
+                                  gene_id %in% auto_genes_osp & gene_id %in% autosomes[[paste0(o_sp, "_ensembl")]]~ "Auto"), out_species=o_sp) -> expr_sp_ts_st_long
+    
+    
+    all_out_expr_long[[o_sp]] <-expr_sp_ts_st_long
+  }
+  
+  all_out_expr_long_merged <- bind_rows(all_out_expr_long)
+  
+  # Removing genes for which we don't have an ortholog in outgroup species
+  all_out_expr_filt <- all_out_expr_long_merged %>%
+    group_by(targ_gene) %>%
+    filter(!any(is.na(expr)))
+  
+  # Calculate median per sex in each gene, outgroup species, tissue 
+  all_out_expr_filt %>% 
+    group_by(gene_id, targ_gene, out_species, chr, tissue, sex) %>%
+    summarize(med_per_sex=median(expr)) %>% 
+    group_by(targ_gene) %>% 
+     # Removing genes that are not in our lists of autosomal or sex-linked genes, or that are not expressed in at least one sex
+    filter(!any(med_per_sex==0) & !is.na(chr)) ->  all_out_med_per_sex 
+    
+  # Getting median across species (in this case only mouse) for each gene in target species
+  all_out_med_per_sex %>%
+    group_by(targ_gene, chr, tissue, sex) %>%
+    summarize(med_out_sp= median(med_per_sex)) -> proto_med_per_ts_sex_g
+  
+  all_proto[[sp]] <- proto_med_per_ts_sex_g 
+  
+
+  }
+  
+
+```
+
+
+
+## Current-Z(X) to Proto-Z(X)
+
+To obtain the current-Z to proto-Z expression ratios we first normalized the current expression levels of Z-linked genes by the median current expression level of all 1∶1 orthologous genes that are autosomal in the outgroup species. We then normalized the ancestral expression levels of each proto-Z–linked gene by the median ancestral expression level of all proto-autosomes in the outgroup species. We then computed the ratio of these two values for each gene, resulting in the current-Z to proto-Z ratios. 
+
+```{r, warning=F}
+all_current_to_proto <-list()
+
+for (sp in species){
+  # Selecting data for proto Z
+  proto_sp <- all_proto[[sp]]
+  
+  proto_sp %>% 
+    group_by(tissue, sex) %>%
+    summarize(protoZ_to_protoA=med_out_sp/median(med_out_sp[chr=="Auto"]), chr=chr, targ_gene=targ_gene) %>%
+    filter(chr %in% c("Z_linked_target", "Z_linked_non_target")) -> proto_ratios
+    
+  # Selecting data for current Z
+  current_sp <- all_current[[sp]]
+  
+  current_sp %>% 
+    group_by(tissue, sex) %>%
+    summarize(Z_to_A=med_expr_sex/median(med_expr_sex[chr=="Auto"]), chr=chr, gene_id=gene_id) %>%
+    filter(chr %in% c("Z_linked_target", "Z_linked_non_target")) -> current_ratios
+  
+  # Joining and filtering
+  current_to_proto <- inner_join(current_ratios, proto_ratios, by=c("gene_id"="targ_gene", "tissue"="tissue", "sex"="sex", "chr"="chr"))
+  current_to_proto %>%
+    mutate(curZ_to_protoZ= Z_to_A/protoZ_to_protoA, log2=log2(curZ_to_protoZ)) -> current_to_proto_final
+}
+```
+
+## Plotting
+
+Finally, we compared the current-Z to proto-Z ratios for Z-linked miR-2954 targets and Z-linked miR-2954 non-targets. As Z-linked targets, we used the experimental miR-2954 targets and as non-targets we used Z-linked genes that are neither experimental miR-2954 targets nor predicted miR-2954 targets. In both cases, we made sure that autosomal miR-2954 targets were excluded when normalizing the expression of current-Z and proto-Z genes by current-autosomal and proto-autosomal genes. Statistically significant deviations of the medians of these ratios from key reference values (e.g., 0.5 [log2 ratio of −1]; 1 [log2 ratio of 0]; and 2 [log2 ratio of 1]) were assessed using one-sample Wilcoxon signed rank tests. P-values were corrected for multiple testing using the Bonferroni procedure, with adjusted P < 0.05 indicating significance.
+
+```{r}
+current_to_proto_final$chr_sex <- paste0(current_to_proto_final$chr, "_", current_to_proto_final$sex)
+
+current_to_proto_final$chr_sex <- factor(current_to_proto_final$chr_sex, levels=c("Z_linked_non_target_Female", "Z_linked_target_Female", "Z_linked_non_target_Male", "Z_linked_target_Male"))
+
+# Tests of statistical significance for all 3 reference levels
+## Reference:0
+ref_test_0 <- current_to_proto_final %>%
+  group_by(tissue, chr_sex) %>% wilcox_test(log2 ~ 1, mu = 0, alternative = "two.sided")%>%
+  mutate(p.adj=round(p.adjust(p, method="bonferroni"), 2)) 
+## Reference:-1
+ref_test_n1 <- current_to_proto_final %>%
+  group_by(tissue, chr_sex) %>% wilcox_test(log2 ~ 1, mu = -1, alternative = "two.sided")%>%
+  mutate(p.adj=round(p.adjust(p, method="bonferroni"), 2)) 
+## Reference:1
+ref_test_p1 <- current_to_proto_final %>%
+  group_by(tissue, chr_sex) %>% wilcox_test(log2 ~ 1, mu = 1, alternative = "two.sided")%>%
+  mutate(p.adj=round(p.adjust(p, method="bonferroni"), 2)) 
+
+# Final plots
+all_tests <- data.frame(tissue=c(ref_test_0$tissue, ref_test_n1$tissue, ref_test_p1$tissue), chr_sex=c(ref_test_0$chr_sex, ref_test_n1$chr_sex, ref_test_p1$chr_sex), ref=c(rep(0, nrow(ref_test_0)), rep(-1, nrow(ref_test_n1)), rep(1, nrow(ref_test_p1))), p=c(ref_test_0$p, ref_test_n1$p, ref_test_p1$p), p.adj=c(ref_test_0$p.adj, ref_test_n1$p.adj, ref_test_p1$p.adj))%>%
+  mutate(new_padj=round(p.adjust(p, method="bonferroni"),2))
+
+all_tests$chr_sex <- factor(all_tests$chr_sex, levels=c("Z_linked_non_target_Female", "Z_linked_target_Female", "Z_linked_non_target_Male", "Z_linked_target_Male"))
+
+current_to_proto_final_sum <- current_to_proto_final %>%
+  group_by(tissue, chr_sex)%>%
+  summarise(med=median(log2), q1=quantile(log2, 0.25), q3=quantile(log2, 0.75))
+
+## Dot plot
+ggplot(current_to_proto_final_sum, aes(x=chr_sex, y=med))+ 
+geom_pointrange(size=0.75, aes(ymin=q1, ymax=q3, fill=chr_sex), colour="black",pch=21, size=5)+
+facet_wrap(~ tissue, nrow = 1) +theme_classic()+ geom_hline(yintercept = -1, linetype="dashed", size=0.2) + geom_hline(yintercept = 0, linetype="dashed", size=0.2) + geom_hline(yintercept = 1, linetype="dashed", size=0.2)+ coord_cartesian(ylim = c(-2.2,2))+ theme(axis.text.x = element_text(angle = 90, hjust = 1))+ scale_fill_manual(values = c("#DCE9F8", "#6664AB", "#DCE9F8", "#6664AB"))+ theme(legend.position = "none")+ ylab("log2(Current-Z/Proto-Z)")
+
+## P-value heatmap
+ggplot(all_tests, aes(x=chr_sex, y=ref, fill= p.adj<0.05)) + 
+  geom_tile(width = 0.5, height = 0.5)+ facet_wrap(~ tissue, nrow = 1)+ theme_classic()+ scale_fill_manual(values = c("red", "lightgrey"))+
+      geom_text(aes(y=ref,label=p.adj))+ theme(legend.position = "none")+ theme(axis.text.x = element_text(angle = 90, hjust = 1)) + ylab("Reference log2(Current-Z/Proto-Z)")
+```
+
