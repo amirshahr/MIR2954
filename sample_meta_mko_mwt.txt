@@ -1,9 +1,0 @@
-Species	Organ	Stage	Sex	Sample	Type
-gallus_gallus	head	E3	female	f1_wt_fetal_rpf	ribo
-gallus_gallus	head	E3	female	f1_wt_fetal_rna	rna
-gallus_gallus	head	E3	male	m1_wt_fetal_rpf	ribo
-gallus_gallus	head	E3	male	m1_wt_fetal_rna	rna
-gallus_gallus	head	E3	male	m1_ko_fetal_rpf	ribo
-gallus_gallus	head	E3	male	m1_ko_fetal_rna	rna
-gallus_gallus	head	E3	male	m2_ko_fetal_rpf	ribo
-gallus_gallus	head	E3	male	m2_ko_fetal_rna	rna
