@@ -1,0 +1,148 @@
+Short RNA Sequencing Alignment & Read Count
+
+Step 1: Merge FastQ Files Across Lanes
+```{bash}
+
+# Create output directory for merged fastq files
+mkdir -p ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/merged_fastq  
+
+# Merge fastq files across sequencing lanes
+for dir in ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/AF553/*; do
+    if [ -d "$dir" ]; then
+        base=$(basename "$dir")
+        zcat "$dir"/*R1_001.fastq.gz | gzip > ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/merged_fastq/${base}_combined.fastq.gz
+    fi
+done
+
+```
+
+Step 2: Trim Adapters and Filter Reads (19-26nt)
+
+```{bash}
+
+#!/bin/bash
+
+for FILE in ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/merged_fastq/*.fastq.gz
+do
+    BASENAME=$(basename $FILE .fastq.gz)
+    cutadapt -a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC -e 0.25 --match-read-wildcards --no-indels -m 19 -M 26 -O 6 -n 1 -o ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/trimmed_fastq/${BASENAME}_trimmed.fastq.gz $FILE
+done
+
+```
+
+3. Process GTF File for microRNA Annotations
+
+```{bash}
+# Load required package
+library(rtracklayer)
+
+# Import GTF file
+chick_gtf <- rtracklayer::import("~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/GRCG7b_microRNA_subset_assembly/Gallus_gallus.bGalGal1.mat.broiler.GRCg7b.109.gtf")
+
+# Subset GTF file for miRNA annotations
+mir_chick_gtf <- chick_gtf[mcols(chick_gtf)$gene_biotype == "miRNA"]
+
+# Save the filtered GTF file
+rtracklayer::export(mir_chick_gtf, "~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/GRCG7b_microRNA_subset_assembly/miRNA_subset.gtf")
+
+```
+
+4. Generate STAR Genome Index for microRNA Analysis
+
+```{bash}
+# Generate STAR index for microRNA alignment
+STAR \
+--runThreadN 16 \
+--runMode genomeGenerate \
+--genomeDir ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/STAR_index \
+--sjdbGTFfile ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/GRCG7b_microRNA_subset_assembly/miRNA_subset.gtf \
+--sjdbOverhang 1 \
+--genomeFastaFiles ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/GRCG7b_microRNA_subset_assembly/Gallus_gallus.bGalGal1.mat.broiler.GRCg7b.dna_sm.toplevel.fa
+
+```
+
+
+5. Align microRNA Reads
+```{bash}
+# Align trimmed microRNA reads to genome
+STAR --genomeDir ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/STAR_index \
+--readFilesIn ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/trimmed_fastq/23-Body_combined_trimmed.fastq.gz \
+--readFilesCommand zcat \
+--runThreadN 16 \
+--sjdbGTFfile ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/GRCG7b_microRNA_subset_assembly/miRNA_subset.gtf \
+--alignEndsType EndToEnd \
+--quantMode TranscriptomeSAM GeneCounts \
+--outSAMtype BAM SortedByCoordinate \
+--outFileNamePrefix ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/STAR_output/23_Body_
+
+```
+
+6. Run STAR Alignment in a Loop for Multiple Samples
+```{bash}
+#!/bin/bash
+
+# Define directories
+input_dir=~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/trimmed_fastq
+output_dir=~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/STAR_output
+
+# Loop over each file and align
+for i in $(ls ${input_dir}/*.fastq.gz | xargs -n 1 basename) ; do
+  base_name=$(basename $i .fastq.gz)
+  echo "Processing ${base_name}"
+  
+  STAR --genomeDir ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/STAR_index \
+  --readFilesIn ${input_dir}/${i} \
+  --readFilesCommand zcat \
+  --runThreadN 16 \
+  --sjdbGTFfile ~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/GRCG7b_microRNA_subset_assembly/miRNA_subset.gtf \
+  --alignEndsType EndToEnd \
+  --quantMode TranscriptomeSAM GeneCounts \
+  --outSAMtype BAM SortedByCoordinate \
+  --outFileNamePrefix ${output_dir}/${base_name}_
+done
+
+```
+
+7. Extract Gene Count Data
+
+```{r}
+# Function to read gene count output from STAR
+read_genecount_output <- function(read_counts_input) {
+  require(tidyverse)
+  ind_count_name <- str_replace_all(read_counts_input, pattern = "/home/amir/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/STAR_output//", replacement = "")
+  ind_count_df <- read_delim(read_counts_input, delim = "\t", skip = 4, show_col_types = FALSE)[,1:2]
+  colnames(ind_count_df) <- c("gene_id", ind_count_name)
+  return(ind_count_df)
+}
+```
+
+8. Create DESeq2 Object
+```{r}
+library(DESeq2)
+
+# Create DESeq2 object
+DeSeq2_mir <- DESeqDataSetFromMatrix(countData = all_raw_counts,
+                                     colData = sample_annotation,
+                                     design = ~ genotype)
+
+# Save DESeq2 object
+saveRDS(DeSeq2_mir, file = "~/miR-2954/datasets/RNA-seq/mir2954_shortRNA_bulk_fastq/data_analysis/mir_2954_microRNA_DeSeq2.rds")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
