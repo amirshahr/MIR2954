@@ -1,0 +1,9 @@
+# The script takes four input files
+# 1) a miRNA file: a tab-delimited text file of mature miRNA information.  This is different from the file required by targetscan_60.pl.
+# 2) a UTR file: a tab-delimited multiple sequence alignment of the 3' UTRs of genes from the desired species
+#		which is the same as the input file for targetscan_60.pl.
+#	3) a PredictedTargets file: output from targetscan_60.pl.
+#	4) TA_SPS_by_seed_region.txt: Contains input parameters and must be in same directory as targetscan_60_context_scores.pl.
+
+
+
