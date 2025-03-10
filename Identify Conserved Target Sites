@@ -1,0 +1,180 @@
+Identifying Conserved Target Sites Between Chicken and Zebra Finch
+
+This script:
+
+Processes and filters 3' UTR sequences from chicken and zebra finch
+Identifies longest UTR per gene
+Aligns homologous genes
+Runs TargetScan to identify conserved miR-2954 targets
+Summarizes conservation statistics
+
+
+1. Verify Input Files
+```{bash}
+# Check input files for chicken and zebra finch UTRs
+head /home/amir/miR-2954/mir_2954_target_prediction/Chicken_GeneName_3UTR.txt
+head /home/amir/miR-2954/mir_2954_target_prediction/ZebraFinch_GeneName_3UTR.txt
+```
+
+
+  2a. Extract Longest 3' UTR Per Gene for chicken
+  
+```{bash}
+#!/usr/bin/env bash
+
+INPUT_FILE="/home/amir/miR-2954/mir_2954_target_prediction/Chicken_GeneName_3UTR.txt"
+OUTPUT_FILE="/home/amir/miR-2954/mir_2954_target_prediction/Chicken_GeneName_3UTR_filtered.txt"
+SPECIES_ID="9031"  # Chicken Taxonomy ID
+
+echo "Filtering longest UTR per gene for Chicken..."
+
+awk -v species_id="$SPECIES_ID" '
+BEGIN { FS = "\t"; OFS = "\t"; header = ""; seq = "" }
+/^>/ {
+  if (header != "" && seq != "" && header != ">" && seq != "Sequence unavailable") {
+    if (length(seq) > length(longest[header])) longest[header] = seq
+  }
+  header = $0 " " species_id
+  seq = ""
+  next
+}
+{ seq = seq $0 }
+END {
+  for (gene in longest) { print gene; print longest[gene] }
+}' "$INPUT_FILE" > "$OUTPUT_FILE"
+
+echo "Done! Filtered file saved to $OUTPUT_FILE"
+head "$OUTPUT_FILE"
+
+```
+
+  
+2b. Extract Longest 3' UTR Per Gene for Zebrafinch
+
+```{bash}
+#!/usr/bin/env bash
+
+INPUT_FILE="/home/amir/miR-2954/mir_2954_target_prediction/ZebraFinch_GeneName_3UTR.txt"
+OUTPUT_FILE="/home/amir/miR-2954/mir_2954_target_prediction/ZebraFinch_GeneName_3UTR_filtered.txt"
+SPECIES_ID="59729"  # Zebra Finch Taxonomy ID
+
+echo "Filtering longest UTR per gene for Zebra Finch..."
+
+awk -v species_id="$SPECIES_ID" '
+BEGIN { FS = "\t"; OFS = "\t"; header = ""; seq = "" }
+/^>/ {
+  if (header != "" && seq != "" && header != ">" && seq != "Sequence unavailable") {
+    if (length(seq) > length(longest[header])) longest[header] = seq
+  }
+  header = $0 " " species_id
+  seq = ""
+  next
+}
+{ seq = seq $0 }
+END {
+  for (gene in longest) { print gene; print longest[gene] }
+}' "$INPUT_FILE" > "$OUTPUT_FILE"
+
+echo "Done! Filtered file saved to $OUTPUT_FILE"
+head "$OUTPUT_FILE"
+
+```
+
+  
+3. Identify Common Genes Between Chicken and Zebra Finch
+  
+  ```{bash}
+  #!/usr/bin/env bash
+
+# Input files
+CHICKEN_FILE="/home/amir/miR-2954/mir_2954_target_prediction/Chicken_GeneName_3UTR_filtered.txt"
+ZEBRAFINCH_FILE="/home/amir/miR-2954/mir_2954_target_prediction/ZebraFinch_GeneName_3UTR_filtered.txt"
+
+# Output file
+COMBINED_FILE="/home/amir/miR-2954/mir_2954_target_prediction/Combined_UTR_with_SpeciesID.txt"
+
+# Extract gene names
+grep "^>" "$CHICKEN_FILE" | sed 's/>//' | awk '{print $1}' > /tmp/chicken_genes.txt
+grep "^>" "$ZEBRAFINCH_FILE" | sed 's/>//' | awk '{print $1}' > /tmp/zebrafinch_genes.txt
+
+# Find common genes
+comm -12 <(sort /tmp/chicken_genes.txt) <(sort /tmp/zebrafinch_genes.txt) > /tmp/common_genes.txt
+
+# Combine sequences for common genes
+awk -v file="/tmp/common_genes.txt" '
+BEGIN { while ((getline < file) > 0) { common[$1] = 1 } }
+/^>/ { gene = substr($1, 2); seq = "" }
+{ seq = seq $0 }
+END { for (g in common) print chicken_seqs[g] "\n" zebrafinch_seqs[g] }' \
+"$CHICKEN_FILE" "$ZEBRAFINCH_FILE" > "$COMBINED_FILE"
+
+echo "Done! Conserved sequences saved to $COMBINED_FILE"
+head "$COMBINED_FILE"
+
+```
+
+4. Align UTR Sequences Using Clustal Omega
+
+```{bash}
+# Directory setup
+cd /home/amir/miR-2954/mir_2954_target_prediction/
+mkdir -p splitted_fasta aligned_fasta
+
+# Split into individual FASTA files
+awk '/^>/{ if (NR > 1) print ""; print $0 "\n"; next } { printf "%s", $0 }' Combined_UTR_with_SpeciesID.txt > splitted_fasta/gene.fasta
+
+# Align each gene sequence
+cd splitted_fasta
+for f in *.fasta
+do
+  clustalo -i "$f" --threads=64 -o aligned_fasta/"${f%.fasta}_aligned.fasta"
+done
+
+# Merge aligned sequences
+cd aligned_fasta
+cat *_aligned.fasta > ../compiled_aligned_chick_zebra.txt
+head ../compiled_aligned_chick_zebra.txt
+```
+
+5. Run TargetScan for Conserved Target Prediction 
+  
+```{bash}
+# Define miR-2954 seed sequences
+echo -e "gg-mir-2954\tAUCCCCA\t9031\ngg-mir-2954\tAUCCCCA\t59729" > mir_2954_seed_chick_zebra.txt
+
+# Run TargetScan for conserved miRNA binding sites
+/home/amir/miR-2954/mir_2954_target_prediction/targetscan_70.pl \
+mir_2954_seed_chick_zebra.txt \
+compiled_aligned_chick_zebra.txt \
+conserved_target_sites_chick_zebra.txt
+
+# View results
+head conserved_target_sites_chick_zebra.txt
+
+```
+
+6. Process and Summarize Conserved Target Data
+```{r}
+library(dplyr)
+library(tidyr)
+
+# Load conserved target predictions
+conserved_targets <- read.delim("/home/amir/miR-2954/mir_2954_target_prediction/conserved_target_sites_chick_zebra.txt")
+
+# Count species in conservation group
+conserved_targets <- conserved_targets %>%
+  filter(species_ID == "9031") %>%
+  mutate(Species_count = sapply(strsplit(as.character(Species_in_this_group), " "), length),
+         Conserved = ifelse(Species_count > 1, "Conserved", "Non-Conserved"))
+
+# Summarize conservation per gene
+summary_counts <- conserved_targets %>%
+  group_by(a_Gene_ID, Site_type, Conserved) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = c(Site_type, Conserved), values_from = Count, values_fill = 0)
+
+# Display summarized results
+summary_counts
+```
+
+
