@@ -1,0 +1,10 @@
+Species	Organ	Stage	Sex	Sample	Type
+gallus_gallus	brain	P155	female	f1_wt_adult_rpf	ribo
+gallus_gallus	brain	P155	female	f2_wt_adult_rpf	ribo
+gallus_gallus	brain	P155	female	f2_wt_adult_rna	rna
+gallus_gallus	brain	P155	male	m1_wt_adult_rpf	ribo
+gallus_gallus	brain	P155	male	m1_wt_adult_rna	rna
+gallus_gallus	head	E3	female	f1_wt_fetal_rpf	ribo
+gallus_gallus	head	E3	female	f1_wt_fetal_rna	rna
+gallus_gallus	head	E3	male	m1_wt_fetal_rpf	ribo
+gallus_gallus	head	E3	male	m1_wt_fetal_rna	rna

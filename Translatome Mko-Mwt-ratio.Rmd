@@ -1,0 +1,203 @@
+---
+title: "Translatome Mko-Mwt-ratio"
+author: "Pascal Lafrenz"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+```{r}
+library(ggpattern)
+library(ggplot2)
+library(ggpubr)
+library(tidyverse)
+library(rstatix)
+
+out_dir <- "./translatome_analysis/"
+
+if (!file.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE)
+} 
+```
+
+
+# Loading data
+
+Loading RPKM and metadata of fetal male chicken head samples.
+
+```{r}
+
+chicken_head <- as.data.frame(read_csv("mko_wt_fpkm_chicken.csv"))
+rownames(chicken_head) <- chicken_head$gene_id
+
+sample_meta_mko_mwt <- readr::read_delim("sample_meta_mko_mwt.txt",delim = "\t")
+
+```
+## Targets
+
+Loading metadata with mir-2954 targets.
+
+```{r}
+chick_gtf <- read_csv("FPKM_1_Z_linked_Upregulated_genes.csv")
+
+chick_gtf <- chick_gtf %>%
+  mutate(
+    chicken_target = factor(chicken_target),
+    mir_target_group = factor(paste0(chr_z_or_auto,"_", chicken_target))
+  )
+```
+
+## Preprocessing
+
+Transform the data into a useful format.
+
+
+```{r}
+chicken_head <- as.data.frame(chicken_head)
+chicken_head$gene_id <- row.names(chicken_head)
+chicken_head_longer <- pivot_longer(chicken_head,
+                                    cols = !gene_id, 
+                                    names_to = "library", 
+                                    values_to = "fpkm")
+
+update_res_table_chicken <- function(res_table, chick_gtf) {
+  res_table <- res_table %>%
+    as.data.frame() %>% 
+    left_join(dplyr::select(chick_gtf, gene_id,expr_targets,chr_z_or_auto, mir_target_group, gene_biotype), by = "gene_id")
+  return(res_table)
+}
+
+chicken_head_longer <- update_res_table_chicken(chicken_head_longer, chick_gtf)
+
+chicken_head_longer <- left_join(chicken_head_longer,sample_meta_mko_mwt,by=c("library"="Sample")) %>%
+  filter(Sex=="male") %>%
+  mutate(Organ = "head fetal")
+
+chicken_head_longer <- cbind(chicken_head_longer,
+                             replicate=c("male wt",
+                                         "male wt",
+                                         "male1 ko",
+                                         "male1 ko",
+                                         "male2 ko",
+                                         "male2 ko")
+                             )
+chicken_head_longer <- chicken_head_longer %>%
+  filter(fpkm > 0) %>%
+  mutate(logFPKM = log2(fpkm))
+
+
+```
+
+## Calculating ratios
+
+Calculate the male knock-out to wild-type ratios.
+
+```{r}
+
+Mwt_Mko_ratio <- chicken_head_longer %>% 
+  filter(library %in% c("m1_wt_fetal_rpf","m1_wt_fetal_rna","m1_ko_fetal_rpf","m1_ko_fetal_rna","m2_ko_fetal_rpf","m2_ko_fetal_rna")) %>%
+  group_by(Organ, gene_id, Type, gene_biotype, mir_target_group,chr_z_or_auto) %>%
+  dplyr::summarise(median_FPKM_male_wt = median(logFPKM[replicate == "male wt"], na.rm = T),
+                   median_FPKM_male_ko = median(logFPKM[replicate %in% c("male1 ko","male2 ko")], na.rm = T)) %>%
+  filter(
+    gene_biotype == "protein_coding",
+      median_FPKM_male_wt >= 1,
+      median_FPKM_male_ko >= 1
+  ) %>%
+  group_by(Type, Organ) %>%
+  mutate(male_wt_to_male_ko_ratio = median_FPKM_male_ko - median_FPKM_male_wt,
+         male_wt_to_male_ko_ratio_normalized = male_wt_to_male_ko_ratio - median(male_wt_to_male_ko_ratio[mir_target_group == "Autosomal_not_target"], na.rm = T),
+         mir_target_group = factor(mir_target_group, levels = c("Autosomal_not_target", "Autosomal_target","Z-linked_not_target","Z-linked_target"))
+  )
+Mwt_Mko_ratio
+```
+
+## Calculate statistics
+
+To compare the ratios between target groups and data types, various statistics are calculated.
+
+
+```{r}
+
+Mwt_Mko_ratio_type_wilcox <- Mwt_Mko_ratio %>%
+  group_by(Organ,mir_target_group) %>%
+  wilcox_test(male_wt_to_male_ko_ratio_normalized~Type,
+              alternative = "two.sided", p.adjust.method = "BH") %>%
+  mutate(y=4.4,
+         chr_z_or_auto = c("Autosomal","Autosomal","Z-linked","Z-linked"))
+Mwt_Mko_ratio_type_wilcox
+
+Mwt_Mko_ratio_target_wilcox <- Mwt_Mko_ratio %>%
+  group_by(Organ,Type) %>%
+  wilcox_test(male_wt_to_male_ko_ratio_normalized~mir_target_group,
+              alternative = "two.sided", p.adjust.method = "BH") %>%
+  filter(
+    (group1 == "Autosomal_not_target" & group2 == "Autosomal_target") |
+    (group1 == "Z-linked_not_target" & group2 == "Z-linked_target")
+  ) %>%
+  mutate(y=c(-3.10,-3.10,-4.60,-4.60),
+         mir_target_group=c("Autosomal","Z-linked","Autosomal","Z-linked"))
+Mwt_Mko_ratio_target_wilcox
+```
+
+## Plotting
+
+Here the distributions and the respective statistical comparisons are plotted.
+
+```{r}
+
+format_p_value <- function(p_value) {
+  p_value_scientific <- formatC(p_value, format = "e", digits = 2)  # Keep 2 decimal places
+  mantissa <- sub("e.*$", "", p_value_scientific)  # Extract mantissa
+  exponent <- sub("^.*e", "", p_value_scientific)  # Extract exponent
+  exponent <- as.integer(exponent)
+  
+  # Return formatted string for ggplot2 (expression-compatible)
+  return(bquote(.(mantissa) ~ "×" ~ 10^.(exponent)))
+}
+
+ggplot(Mwt_Mko_ratio, aes(x = chr_z_or_auto, y = male_wt_to_male_ko_ratio_normalized,fill=mir_target_group,pattern=Type)) +
+  geom_boxplot_pattern(
+    notch = TRUE, 
+    outlier.shape = NA, 
+    pattern_fill = "black", 
+    pattern_density = 0.1,  # Adjust crosshatch density
+    pattern_spacing = 0.02, # Adjust spacing of pattern
+    pattern_linetype = 1
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for better readability
+  labs(title = "", x = "", y = "log2FC") +
+  geom_segment(aes(x = 0.65, xend = 0.95, y = 3.75, yend = 3.75), color = "black", size = 0.5) +
+  geom_segment(aes(x = 1.05, xend = 1.35, y = 3.75, yend = 3.75), color = "black", size = 0.5) +
+  geom_segment(aes(x = 1.65, xend = 1.95, y = 3.75, yend = 3.75), color = "black", size = 0.5) +
+  geom_segment(aes(x = 2.05, xend = 2.35, y = 3.75, yend = 3.75), color = "black", size = 0.5) +
+  geom_segment(aes(x = 0.7, xend = 1.1, y = -3.75, yend = -3.75), color = "black", size = 0.5) +
+  geom_segment(aes(x = 0.9, xend = 1.3, y = -5.25, yend = -5.25), color = "black", size = 0.5) +
+  geom_segment(aes(x = 1.7, xend = 2.1, y = -3.75, yend = -3.75), color = "black", size = 0.5) +
+  geom_segment(aes(x = 1.9, xend = 2.3, y = -5.25, yend = -5.25), color = "black", size = 0.5) +
+  geom_text(data = Mwt_Mko_ratio_type_wilcox, 
+            aes(x=c(0.8,1.2,1.8,2.2),y = y, label = sapply(p,format_p_value)), 
+            parse = T, size = 7,
+            inherit.aes = F) +
+  geom_text(data = Mwt_Mko_ratio_target_wilcox, aes(x = c(0.9,1.9,1.1,2.1), y = y, label = sapply(p,format_p_value)), parse = T, size = 7) +
+  scale_pattern_manual(name = "", values = c("ribo" = "stripe", "rna" = "none"),labels = c("ribo" = "RIBO", "rna" = "RNA")) +
+  scale_fill_manual(name = "",
+    values = c("Autosomal_not_target" = "#DCE9F8", "Z-linked_not_target" = "#DCE9F8","Autosomal_target" = "#6664AB", "Z-linked_target" = "#6664AB"),
+    breaks = c("Autosomal_not_target", "Autosomal_target"),
+    labels = c("Non-targets", "Targets")) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  facet_grid(.~Organ) +
+  scale_x_discrete(labels = c("not_exp_target" = "Other-Z", "exp_target" = "Exp-Z")) +
+  guides(fill = guide_legend(override.aes = list(pattern = "none"))) +
+  theme_classic() +
+  theme(text = element_text(size=20))
+  
+ggsave(paste0(out_dir,"/Mwt_Mko_ratio_norm.pdf"), dpi="retina",height = 9, width = 12)
+
+```
+
+
+
+
+
+
