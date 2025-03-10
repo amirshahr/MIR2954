@@ -1,0 +1,31 @@
+
+
+1: Create STAR Genome Index
+
+
+```{bash}
+# Generate genome index for STAR alignment
+STAR \
+--runThreadN 64 \
+--runMode genomeGenerate \
+--genomeDir ~/miR-2954/datasets/RNA-seq/STAR_index \
+--sjdbGTFfile ~/miR-2954/datasets/RNA-seq/Gallus_gallus.bGalGal1.mat.broiler.GRCg7b.107.gtf \
+--sjdbOverhang 1 \
+--genomeFastaFiles ~/miR-2954/datasets/RNA-seq/GRCG7b_microRNA_subset_assembly/Gallus_gallus.bGalGal1.mat.broiler.GRCg7b.dna_sm.toplevel.fa
+
+```
+
+2: Map Reads and Generate Gene Counts
+
+```{bash}
+# Align reads and generate gene counts
+STAR --runThreadN 64 \
+--genomeDir ~/miR-2954/datasets/RNA-seq/STAR_index \
+--sjdbGTFfile ~/miR-2954/datasets/RNA-seq/Gallus_gallus.bGalGal1.mat.broiler.GRCg7b.107.gtf \
+--readFilesCommand gunzip -c \
+--readFilesIn ~/miR-2954/datasets/RNA-seq/bulk_fastq/AAAWGH3HV_AF5512_22s005137-1-1_Ibberson_lane123body_sequence.txt.gz \
+--quantMode GeneCounts \
+--outFileNamePrefix ~/miR-2954/datasets/RNA-seq/mapped_reads/
+
+```
+
