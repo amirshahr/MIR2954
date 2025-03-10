@@ -1,0 +1,68 @@
+
+
+1. Load Required Libraries and read FPKM File
+
+```{r}
+# Clear environment
+rm(list = ls())
+
+# Load required libraries
+library(tidyverse)
+
+# Define file paths
+FPKM_file <- "~/chick_sexdet_rna-seq/re_mapped_GRCg7b/evoDevo_gonad_FPKM_long.rds"
+GTF_file <- "~/miR-2954/mir_2954_target_prediction/Final_GRCg7b_gtf_all_target_sites_integrated_human_ortho_chickOhno_DosSensitivity_zebra_ostrich_contextScore_conserved_sites.rds"
+
+# Load datasets
+long_FPKM <- readRDS(FPKM_file)
+gtf <- readRDS(GTF_file)
+
+```
+
+2. Filter for Protein-Coding Genes
+```{r}
+# Extract protein-coding gene IDs from GTF annotation
+protein_coding_gtf <- gtf %>% filter(gene_biotype == "protein_coding")
+
+# Subset FPKM dataset to include only protein-coding genes
+protein_coding_long_FPKM <- long_FPKM %>% 
+  filter(gene_id %in% protein_coding_gtf$Gene_stable_ID)
+
+# Display dataset preview
+head(protein_coding_long_FPKM)
+
+```
+
+3. Compute Mean FPKM for Each Gene Across Stages
+```{r}
+# Compute mean FPKM expression for each gene across age, sex, tissue, and developmental stage
+All_FPKM_mean <- protein_coding_long_FPKM %>% 
+  group_by(gene_id, age, developmental_stage, sex, tissue) %>% 
+  summarise(
+    mean_FPKM = mean(FPKM, na.rm = TRUE), 
+    .groups = "drop"
+  )
+
+# Display summary
+head(All_FPKM_mean)
+
+```
+
+4. Identify Expressed Genes (FPKM > 1)
+```{r}
+# Identify genes with maximum mean FPKM > 1 across all conditions
+All_high_fpkm_genes <- All_FPKM_mean %>%
+  group_by(gene_id) %>%
+  summarise(
+    max_FPKM = max(mean_FPKM, na.rm = TRUE), 
+    .groups = "drop"
+  ) %>%
+  filter(max_FPKM > 1) %>%
+  pull(gene_id)
+
+# Display list of highly expressed genes
+print(All_high_fpkm_genes)
+
+```
+
+
