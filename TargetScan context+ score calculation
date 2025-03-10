@@ -6,4 +6,90 @@
 #	4) TA_SPS_by_seed_region.txt: Contains input parameters and must be in same directory as targetscan_60_context_scores.pl.
 
 
+1. Generate miRNA Input File for TargetScan Context Scores
+
+```{r}
+# Clear environment
+rm(list = ls())
+
+# Load necessary library
+library(tidyverse)
+
+# Define the header
+header <- c("miRNA_family_ID", "Species_ID", "MiRBase_ID", "Mature_sequence")
+
+# Define miRNA information for miR-2954
+miRNA_info <- c("mir-2954", "9031", "mir-2954", "CAUCCCCAUUCCACUCCUAGCAG")
+
+# File path for the output
+file_path <- "/home/amir/miR-2954/mir_2954_target_prediction/miR_for_context_scores.txt"
+
+# Combine header and miRNA information into a single tab-separated string
+file_content <- paste(paste(header, collapse = "\t"), paste(miRNA_info, collapse = "\t"), sep = "\n")
+
+# Write the content to the file
+writeLines(file_content, con = file_path)
+
+# Confirmation message
+cat("File successfully created at:", file_path, "\n")
+
+```
+
+
+
+2. Verify Input Files Before Running TargetScan
+```{bash}
+# Display first few lines of the input files
+head /home/amir/miR-2954/mir_2954_target_prediction/miR_for_context_scores.txt
+head /home/amir/miR-2954/mir_2954_target_prediction/Processed_GRCG7b_3UTR.txt
+head /home/amir/miR-2954/mir_2954_target_prediction/Processed_miR-2954_predicted_targets.txt
+
+```
+
+
+3. Run TargetScan to Calculate Context Scores
+```{r}
+# Execute TargetScan context score calculation
+/home/amir/miR-2954/mir_2954_target_prediction/targetscan_60_context_scores.pl \
+/home/amir/miR-2954/mir_2954_target_prediction/miR_for_context_scores.txt \
+/home/amir/miR-2954/mir_2954_target_prediction/Processed_GRCG7b_3UTR.txt \
+/home/amir/miR-2954/mir_2954_target_prediction/Processed_miR-2954_predicted_targets.txt \
+/home/amir/miR-2954/targetscan_60_context_scores_output.txt
+
+```
+
+4. Load and Process TargetScan Output
+```{r}
+# Load predicted target genes
+targets <- read.delim("/home/amir/miR-2954/mir_2954_target_prediction/Processed_miR-2954_predicted_targets.txt")
+
+# Load context scores
+context_scores <- read.delim("/home/amir/miR-2954/targetscan_60_context_scores_output.txt", check.names = TRUE) %>%
+  separate(Gene.ID, into = c("Gene.ID", "Transcript.ID"), sep = "\\|", extra = "drop") %>% # Ensure clean separation
+  rename(gene_id = Gene.ID, context_score = `context..score`) %>%
+  mutate(context_score = as.numeric(context_score))  # Convert context scores to numeric
+
+# Display processed context score data
+head(context_scores)
+
+```
+
+5. Summarize Context Scores by Gene
+```{r}
+# Summarize context scores per gene
+summed_scores <- context_scores %>%
+  mutate(context_score = ifelse(context_score > 0, 0, context_score)) %>%  # Ensure only negative scores are considered
+  group_by(gene_id) %>%
+  summarise(
+    sum_context_score = sum(context_score, na.rm = TRUE),
+    average_context_score = mean(context_score, na.rm = TRUE),
+    median_context_score = median(context_score, na.rm = TRUE)
+  )
+
+# Display summary statistics
+head(summed_scores)
+
+```
+
+
 
