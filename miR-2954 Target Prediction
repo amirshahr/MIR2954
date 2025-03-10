@@ -1,0 +1,71 @@
+
+1. Load Required Libraries
+
+```{r}
+# Clear environment
+rm(list = ls())
+
+# Load necessary libraries
+library(tidyverse)
+library(Biostrings)
+```
+
+
+2: Create Seed Sequence File for TargetScan
+```{r}
+
+# Define miR-2954 seed sequence and related identifiers
+seed_seq <- c("gg-mir-2954", "AUCCCCA", "9031")
+
+# Create tab-separated line for the seed file
+seed_seq_line <- paste(seed_seq, collapse = "\t")
+
+# Define output file path
+file_path <- "/home/amir/miR-2954/mir_2954_target_prediction/mir_2954_seed.txt"
+
+# Save the seed sequence to a text file
+cat(seed_seq_line, file = file_path, sep = "\n")
+
+```
+
+ 3. Process 3' UTR Sequences for TargetScan
+
+```{r}
+# Load required libraries
+library(Biostrings)
+library(tidyverse)
+
+# Read the 3' UTR FASTA file
+fasta_file <- readDNAStringSet(file = "~/miR-2954/mir_2954_target_prediction/GRCG7b_3UTR_BioMart.txt", format = "fasta")
+
+# Convert the DNAStringSet object to a data frame
+UTR3_DNA <- data.frame(id = names(fasta_file), sequence = as.character(fasta_file), stringsAsFactors = FALSE)
+
+# Add organism identifier (Gallus gallus, Taxonomy ID: 9031)
+UTR3_DNA$organism <- "9031"
+
+# Format the data for TargetScan
+UTR3_DNA <- UTR3_DNA %>% 
+  rownames_to_column(var = "ID") %>% 
+  select(id, organism, sequence) %>%
+  mutate(id = str_replace(id, "\\|", "_")) # Replace '|' with '_'
+
+# Display last few rows for verification
+tail(UTR3_DNA)
+
+# Define output file path
+output_path <- "/home/amir/miR-2954/mir_2954_target_prediction/GRCG7b_DNA_3UTR_for_TargetScan.txt"
+
+# Save the formatted UTR sequences for TargetScan
+write.table(UTR3_DNA, output_path, sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
+
+```
+
+4. Run TargetScan to Identify miR-2954 Targets
+```{bash}
+# Run TargetScan using the generated files
+./targetscan_70.pl ./mir_2954_seed.txt ./GRCG7b_DNA_3UTR_for_TargetScan.txt ./miR-2954_predicted_targets_DNA_UTR.txt 
+
+```
+
+
