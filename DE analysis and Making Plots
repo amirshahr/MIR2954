@@ -1,9 +1,13 @@
 
 
-```{r echo=FALSE, include=FALSE}
 
+1. Load Required Packages and Data
+
+```{r}
+# Clear environment
 rm(list = ls())
 
+# Load necessary libraries
 library(tidyverse)
 library(DESeq2)
 library(ggforce)
@@ -12,31 +16,24 @@ library(vsn)
 library(enrichR)
 library(gridExtra)
 
-```
-
-
-Importing the ranged dataset for mir-2954 DESeq2 object 
-
-```{r}
+# Load DESeq2 object
 mir_DeSeq2 <- readRDS("~/miR-2954/datasets/RNA-seq/mir-2954_DeSeq2_object_long_RNA_ranged.rds")
 
+# Display sample metadata
 colData(mir_DeSeq2)
-```
 
+# Load annotated GTF file with miR-2954 target sites
+chick_gtf <- readRDS("~/miR-2954/mir_2954_target_prediction/GRCg7b_gtf_all_target_sites_integrated.rds")
 
-Importing the GTF files with targets integrated in it
-```{r}
-chick_gtf <- readRDS( "~/miR-2954/mir_2954_target_prediction/GRCg7b_gtf_all_target_sites_integrated.rds")
+# Display first few rows
 head(chick_gtf)
+
 ```
 
-Categorizing Z linked genes and subsetting them in De_seq object
-```{r fig.width= 10 , fig.height= 6}
 
-library(dplyr)
-unique(chick_gtf$chr_z_or_auto)
-
-# Filter and categorize genes in chick_gtf
+2. Categorizing Z-Linked Genes
+```{r}
+# Categorize genes as Z-linked or autosomal
 chick_gtf <- chick_gtf %>%
   mutate(
      chr_z_or_auto = factor(str_replace(chr_z_or_auto, "-","_")), 
@@ -44,86 +41,82 @@ chick_gtf <- chick_gtf %>%
      mir_target_group = factor(paste0(chr_z_or_auto,"_", mir_targets_6_8))
     )
 
-# gene Id of Z Linked targets
-Z_linked_target_list <- chick_gtf %>%  filter(mir_targets_6_8 == "target" & chr_z_or_auto == "Z_linked") %>%
-  dplyr::pull(gene_id)
-Z_linked_target_list
+# Extract Z-linked target gene list
+Z_linked_target_list <- chick_gtf %>%  
+  filter(mir_targets_6_8 == "target" & chr_z_or_auto == "Z_linked") %>%
+  pull(gene_id)
 
-Z_linked_list <- chick_gtf %>%  filter(chr_z_or_auto == "Z_linked") %>%
-  dplyr::pull(gene_id)
-Z_linked_list
+# Extract all Z-linked genes
+Z_linked_list <- chick_gtf %>%
+  filter(chr_z_or_auto == "Z_linked") %>%
+  pull(gene_id)
 
+# Subset DESeq2 object for Z-linked target genes
+Z_target_mir_DeSeq2 <- mir_DeSeq2[row.names(mir_DeSeq2) %in% Z_linked_target_list,]
 
-Z_target_mir_DeSeq2 <-  mir_DeSeq2[row.names(mir_DeSeq2) %in% Z_linked_target_list,]
-Z_mir_DeSeq2 <-  mir_DeSeq2[row.names(mir_DeSeq2) %in% Z_linked_list,]
-Z_mir_DeSeq2
+# Subset DESeq2 object for all Z-linked genes
+Z_mir_DeSeq2 <- mir_DeSeq2[row.names(mir_DeSeq2) %in% Z_linked_list,]
 
 ```
 
-
-
-
-Select Samples 
+3. Select Samples Based on Experimental Conditions
 ```{r}
-
+# Function to subset DESeq2 data based on age, sex, tissue, and genotype
 select_samples <- function(data, age, sex, tissue, breed = c("HL","F1"), genotype = c("WT","HZ","KO")) {
-  subset_data <- data[, colData(data)$embryonic_age %in% age & colData(data)$sex %in% sex & colData(data)$tissue %in% tissue & colData(data)$breed %in% breed & colData(data)$genotype %in% genotype]
+  subset_data <- data[, colData(data)$embryonic_age %in% age & 
+                         colData(data)$sex %in% sex & 
+                         colData(data)$tissue %in% tissue & 
+                         colData(data)$breed %in% breed & 
+                         colData(data)$genotype %in% genotype]
+  
   subset_data$tissue <- droplevels(subset_data$tissue)
   subset_data$embryonic_age <- droplevels(subset_data$embryonic_age)
   subset_data$genotype <- droplevels(subset_data$genotype)
   subset_data$breed <- droplevels(subset_data$breed)
   subset_data$sex <- droplevels(subset_data$sex)
+  
   return(subset_data)
 }
 
-
-#Example
-#selected_data <- select_samples(mir_DeSeq2, age = 3, sex = c("Male"), tissue = c("Heart"))
-#colData(selected_data)
-
 ```
 
-Run DESeq2 
+4. Run DESeq2 Analysis
 ```{r}
+# Function to perform DESeq2 analysis
 run_DESeq2 <- function(dseq_data, formula_design, contrast_values) {
   design_formula <- as.formula(formula_design)
   design(dseq_data) <- design_formula
   dseq_data <- DESeq(dseq_data)
   
-  # create a results table with the specified contrast
-  res <- results(dseq_data, contrast=contrast_values)
+  # Create results table based on contrast values
+  res <- results(dseq_data, contrast = contrast_values)
   
   return(res)
 }
+
 ```
 
-Update result table with padj > 0.05 as significant    
+5. Update Result Table with miR-2954 Target Info
 ```{r}
-
+# Function to integrate GTF annotations into DESeq2 results
 update_res_table <- function(res_table, chick_gtf) {
   res_table <- res_table %>%
     as.data.frame() %>% 
-    rownames_to_column ("gene_id") %>% 
-    left_join(dplyr::select(chick_gtf, gene_id,gene_name, mir_target_group, chr_z_or_auto, mir_targets_6_8), by = "gene_id") %>%
+    rownames_to_column("gene_id") %>% 
+    left_join(select(chick_gtf, gene_id, gene_name, mir_target_group, chr_z_or_auto, mir_targets_6_8), by = "gene_id") %>%
     mutate(significant_genes = ifelse(is.na(padj) | padj > 0.05, "not_significant", "significant"))
+  
   return(res_table)
 }
-```
 
+```
+6. Full Workflow for DE Analysis
 
 ```{r}
-
+# Function to run DESeq2, update results, and return cleaned table
 analyze_samples_age_cov <- function(data, age, sex, tissue, formula_design, contrast_values) {
-  # Define the genotypes
-  genotypes <- c("KO","HZ","WT")
-
-  # Select samples
-  selected_data <- select_samples(data, age, sex, tissue, genotype = genotypes)
-  
-  # Run DESeq2
+  selected_data <- select_samples(data, age, sex, tissue)
   res_table <- run_DESeq2(selected_data, formula_design, contrast_values)
-  
-  # Update results table
   updated_res_table <- update_res_table(res_table, chick_gtf)
   
   return(updated_res_table)
@@ -131,153 +124,49 @@ analyze_samples_age_cov <- function(data, age, sex, tissue, formula_design, cont
 
 ```
 
+7. Run DE Analysis for Protein-Coding Genes
+```{r}
+# Subset protein-coding genes from GTF
+protein_coding_gene_list <- chick_gtf %>%
+  filter(gene_biotype == "protein_coding") %>%
+  pull(gene_id)
 
+# Subset DESeq2 object for protein-coding genes
+protein_coding_DeSeq2 <- mir_DeSeq2[row.names(mir_DeSeq2) %in% protein_coding_gene_list,]
 
-Categorizing protein coding genes and sub-setting them in De_seq object
+# Run DESeq2 for male embryos (E3 & E5)
+age <- c(3, 5)
+sex <- "Male"
+formula_design <- "~ genotype + embryonic_age"
+contrast_values <- c("genotype", "KO", "WT")
 
-```{r fig.width= 10 , fig.height= 6}
+result_head <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, "Head", formula_design, contrast_values)
+result_body <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, "Body", formula_design, contrast_values)
+result_heart <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, "Heart", formula_design, contrast_values)
 
-# Filter and categorize genes in chick_gtf
-chick_gtf <- chick_gtf %>%
-  mutate(
-     chr_z_or_auto = factor(str_replace(chr_z_or_auto, "-","_")), 
-     mir_targets_6_8 = factor(mir_targets_6_8),
-     mir_target_group = factor(paste0(chr_z_or_auto,"_", mir_targets_6_8))
-    )
+# Run DESeq2 for whole male embryo (E2)
+age <- c(2)
+sex <- "Male"
+formula_design <- "~ genotype"
+contrast_values <- c("genotype", "KO", "WT")
 
-# gene Id of Z Linked targets
-protein_coding_gene_list <- chick_gtf %>%  filter( gene_biotype == "protein_coding") %>%
-  dplyr::pull(gene_id)
+result_whole <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, "Whole", formula_design, contrast_values)
 
-
-protein_coding_DeSeq2 <-  mir_DeSeq2[row.names(mir_DeSeq2) %in% protein_coding_gene_list,]
-protein_coding_DeSeq2 
-```
-
-DE analysis on protein coding genes
-`````{r}
-age <- c(3, 5)  # ages
-sex <- "Male"  # sex
-formula_design <- "~ genotype + embryonic_age"  # design formula
-contrast_values <- c("genotype", "KO", "WT")  # contrast values
-
-result_head <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, tissue = "Head", formula_design, contrast_values)
-result_body <- analyze_samples_age_cov(protein_coding_DeSeq2 , age, sex, tissue = "Body", formula_design, contrast_values)
-result_heart <- analyze_samples_age_cov(protein_coding_DeSeq2 , age, sex, tissue = "Heart", formula_design, contrast_values)
-
-
-# Whole male embryo 
-age <- c(2)  # ages
-sex <- "Male"  # sex
-formula_design <- "~ genotype"  # design formula
-contrast_values <- c("genotype", "KO", "WT")  # contrast values
-result_whole <- analyze_samples_age_cov(protein_coding_DeSeq2 , age, sex, tissue = "Whole", formula_design, contrast_values)
-
-result_whole %>% filter (padj <= 0.05) 
-
-# Whole female embryo 
+# Run DESeq2 for whole female embryo (E2)
 female_F1_data <- protein_coding_DeSeq2[, colData(protein_coding_DeSeq2)$breed == "F1" & colData(protein_coding_DeSeq2)$sex == "Female"]
-colData(female_F1_data) 
-
-# female F1
-age <- c(2)  # ages
-sex <- "Female"  # sex
-formula_design <- "~ genotype"  # design formula
-contrast_values <- c("genotype", "KO", "WT")  # contrast values
-
-result_whole_female <- analyze_samples_age_cov(female_F1_data , age, sex, tissue = "Whole", formula_design, contrast_values)
-
-result_whole_female  %>% filter (padj <= 0.05) 
-
-result_whole_female
+result_whole_female <- analyze_samples_age_cov(female_F1_data, age, "Female", "Whole", formula_design, contrast_values)
 
 ```
-Save the output files for SI
+
+8. Save Results for Supplementary Information
 
 ```{r}
-
 write_csv(result_whole_female, "~/miR-2954/Supplementary_information/DE_KO_vs_WT_Female_Whole_E2.csv") 
 write_csv(result_whole, "~/miR-2954/Supplementary_information/DE_KO_vs_WT_Male_Whole_E2.csv") 
 write_csv(result_head, "~/miR-2954/Supplementary_information/DE_KO_vs_WT_Male_Head_E3_E5.csv") 
 write_csv(result_heart, "~/miR-2954/Supplementary_information/DE_KO_vs_WT_Male_Heart_E3_E5.csv") 
 write_csv(result_body, "~/miR-2954/Supplementary_information/DE_KO_vs_WT_Male_Body_E3_E5.csv")
 
-
-```
-
-get the p values for Z linked not targets vs Autosomal non-targets
-
-```{r}
-data <- result_heart
-
-# Perform Wilcoxon test for Autosomal category
-  autosomal_test <- wilcox.test(
-    data$log2FoldChange[data$chr_z_or_auto == "Autosomal" & data$mir_targets_6_8 == "not_target"], 
-    data$log2FoldChange[data$chr_z_or_auto == "Z_linked" & data$mir_targets_6_8 == "not_target"]
-  )
-
-autosomal_test
-
-```
-
-
-
-Binding male and female and female result 
-
-
-```{r}
-result_whole <- result_whole %>% mutate(sex = "Male")
-result_whole_female <- result_whole_female %>% mutate(sex = "Female")
-
-# Bind the rows
-male_and_female_D2 <- bind_rows(result_whole, result_whole_female)
-male_and_female_D2 %>% select(gene_id, log2FoldChange, sex , mir_target_group) 
-
-unique(male_and_female_D2$mir_target_group)
-
-p <- male_and_female_D2 %>% ggplot(aes(y = log2FoldChange,  x = sex, fill = mir_target_group) )
-p + geom_boxplot(notch = TRUE, outlier.shape = NA) + theme_classic() +  coord_cartesian(ylim = c(-2,2.2))
-
-```
-
-```{r fig.width= 10}
-library(ggplot2)
-library(ggpubr)
-library(ggsignif)
-
-# Basic boxplot
-p <- male_and_female_D2 %>%
-  ggplot(aes(y = log2FoldChange, x = mir_target_group, fill = mir_target_group)) +
-  geom_boxplot(notch = TRUE, outlier.shape = NA) + 
-  facet_wrap(~ sex) +
-  theme_classic() +
-  coord_cartesian(ylim = c(-2,2))
-
-# Define comparisons
-comparisons <- list(
-  c("Autosomal_not_target", "Autosomal_target"), 
-  c("Z_linked_not_target", "Z_linked_target")
-)
-
-# Add significance annotations using stat_compare_means
-p <- p + stat_compare_means(aes(group = mir_target_group), 
-                            comparisons = comparisons, 
-                            method = "wilcox.test", 
-                            p.adjust.method = "bonferroni",
-                            hide.ns = TRUE)
-
-# Use geom_signif to customize appearance of significance bars
-p <- p + geom_signif(comparisons = comparisons, 
-                     y_position = c(0.6, 0.6), 
-                     tip_length = 0,  # This argument controls the 'U' shape; setting to 0 makes it a simple line
-                     vjust = 0.2,
-                     textsize = 2)
-
-p <- p + theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-print(p)
-
-
 ```
 
 
@@ -289,654 +178,12 @@ print(p)
 
 
 
-```{r}
 
-my_theme <- theme(
-  strip.background = element_blank(),
-  strip.text = element_text(size = 5, margin = margin(t = 0, r = 0, b = 0, l = 0)),
-  plot.background = element_rect(fill = "transparent", color = NA),
-  plot.margin = margin(t = 1, r = 1, b = 0, l = 0),
-  plot.title = element_text(hjust = 0.5, vjust = 0, size = 5), 
-  text = element_text(size = 5),
-  axis.text.x = element_text(angle = 0, hjust = 0.5 ,vjust = 0 ,size = 5),
-  axis.title.y = element_text(vjust = 0),
-  axis.text = element_text(size = 5, color = "black"),
-  axis.title = element_text(size = 5, color = "black"),
-  axis.line = element_line(color = "black"),
-  legend.position = "top",
-  legend.box = "vertical" ,
-  legend.text = element_text(size = 5, color = "black"),
-  legend.spacing.x = unit(0.1, "cm"),
-  legend.spacing.y = unit(0.05, "cm"),
-  legend.margin = margin(t = 0, r = 0, b = -5, l = 0),
-  legend.key.size = unit(0.3, "lines"),
-  legend.background = element_rect(fill = "white", color = "white"), 
-  legend.box.margin = margin(t = 0, r = 0, b = 0, l = 0),
-  panel.spacing = unit(0.5, "lines"),   # Add panel.spacing attribute
-  panel.background = element_rect(fill = "transparent", color = "NA") # Add panel.background attribute
-)
-```
 
-Box plot of fold change 
 
-```{r}
 
 
-draw_boxplot <- function(data, title, output_filename) {
-  
-# Perform Wilcoxon test for Autosomal category
-  autosomal_test <- wilcox.test(
-    data$log2FoldChange[data$chr_z_or_auto == "Autosomal" & data$mir_targets_6_8 == "target"], 
-    data$log2FoldChange[data$chr_z_or_auto == "Autosomal" & data$mir_targets_6_8 == "not_target"]
-  )
-  autosomal_p_value <- autosomal_test$p.value
 
 
-  # Perform Wilcoxon test for Z-linked category
-  z_linked_test <- wilcox.test(
-    data$log2FoldChange[data$chr_z_or_auto == "Z_linked" & data$mir_targets_6_8 == "target"], 
-    data$log2FoldChange[data$chr_z_or_auto == "Z_linked" & data$mir_targets_6_8 == "not_target"]
-  )
-  z_linked_p_value <- z_linked_test$p.value
 
 
-
-  # Generate the boxplot
-  p <- ggplot(data, aes(x = chr_z_or_auto, y = log2FoldChange, fill = mir_targets_6_8)) + 
-    geom_boxplot(notch = TRUE, outlier.shape = NA, color = "black", lwd = 0.2) + 
-    coord_cartesian(ylim = c(-2,2.2)) + 
-    scale_fill_manual(values = c("target" = "#6664AB", "not_target" = "#DCE9F8"), 
-                      name = "", 
-                      labels = c("target" = "Target", 
-                                 "not_target" = "Not_target")) +
-    scale_x_discrete(labels = c("Autosomal" = "Autosomal", "Z_linked" = "Z-linked")) +  # update here
-    xlab("") + 
-    ylab("Log2FC") +
-    ggtitle(title)
-
-  p <- p + 
-    geom_segment(aes(x = 0.9, xend = 1.1, y = 1.7, yend = 1.7), color = "black", size = 0.2) +
-    geom_segment(aes(x = 1.9, xend = 2.1, y = 1.7, yend = 1.7), color = "black", size = 0.2)
-
-  format_p_value <- function(p_value) {
-  p_value_scientific <- formatC(p_value, format = "e", digits = 1)
-  mantissa <- sub("e.*$", "", p_value_scientific)
-  exponent <- sub("^.*e", "", p_value_scientific)
-  exponent <- as.integer(exponent)
-  paste0(mantissa, " %*% 10^", exponent)  # Changed to a format that can be parsed
-}
-
-
-# Add p-values to the plot (formatted using the new format)
-p <- p + annotate("text", x = 1, y = 2.1, label = format_p_value(autosomal_p_value), color = "black", size = 2, parse = TRUE) # Added parse = TRUE
-p <- p + annotate("text", x = 2, y = 2.1, label = format_p_value(z_linked_p_value), color = "black", size = 2, parse = TRUE) # Added parse = TRUE
-
-  p <- p  +   theme_classic() + my_theme 
-
-  print(p)
-
-  ggsave(
-    plot = p,
-    filename = output_filename,
-    device = "pdf",
-    width = 4.2,
-    height =4.2,
-    units = "cm",
-    dpi = 300,
-    bg = "transparent",
-    useDingbats = FALSE)
-}
-
-```
-
-
-```{r}
-draw_boxplot(result_head, "Head", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_KO_vs_WT_Head.pdf")
-draw_boxplot(result_body, "Body", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_KO_vs_WT_Body.pdf")
-draw_boxplot(result_heart, "Heart", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_KO_vs_WT_Heart.pdf")
-draw_boxplot(result_whole, "Whole", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_KO_vs_WT_Whole_Male.pdf")
-draw_boxplot(result_whole_female, "Whole", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_KO_vs_WT_Whole_female.pdf")
-
-```
-
-#DE of the HZ vs WT for E2
-
-`````{r}
-age <- c(3, 5)  # ages
-sex <- "Male"  # sex
-formula_design <- "~ genotype + embryonic_age"  # design formula
-contrast_values <- c("genotype", "HZ", "WT")  # contrast values
-
-result_head_HZ <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, tissue = "Head", formula_design, contrast_values)
-result_body_HZ <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, tissue = "Body", formula_design, contrast_values)
-result_heart_HZ <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, tissue = "Heart", formula_design, contrast_values)
-
-
-
-# Male Het E2
-age <- c(2)  # ages
-
-# Whole male embryo 
-age <- c(2)  # ages
-sex <- "Male"  # sex
-formula_design <- "~ genotype"  # design formula
-contrast_values <- c("genotype", "HZ", "WT")  # contrast values
-result_whole_male_HZ <- analyze_samples_age_cov(protein_coding_DeSeq2 , age, sex, tissue = "Whole", formula_design, contrast_values)
-
-
-```
-
-
-```{r}
-draw_boxplot(result_head_HZ, "Head", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_HZ_vs_WT_Head.pdf")
-draw_boxplot(result_body_HZ, "Body", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_HZ_vs_WT_Body.pdf")
-draw_boxplot(result_heart_HZ, "Heart", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_HZ_vs_WT_Heart.pdf")
-draw_boxplot(result_whole_male_HZ, "Whole Embryo", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_HZ_vs_WT_Whole_E2_Male.pdf")
-
-```
-`````{r}
-age <- c(3, 5)  # ages
-sex <- "Male"  # sex
-formula_design <- "~ genotype + embryonic_age"  # design formula
-contrast_values <- c("genotype", "KO", "HZ")  # contrast values
-
-result_head_HZ_KO <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, tissue = "Head", formula_design, contrast_values)
-result_body_HZ_KO <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, tissue = "Body", formula_design, contrast_values)
-result_heart_HZ_KO <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, tissue = "Heart", formula_design, contrast_values)
-
-```
-
-
-```{r}
-draw_boxplot(result_head_HZ_KO, "Head", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_KO_vs_HZ_Head.pdf")
-draw_boxplot(result_body_HZ_KO, "Body", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_KO_vs_HZ_Body.pdf")
-draw_boxplot(result_heart_HZ_KO, "Heart", "/home/amir/miR-2954/plots/PC_Box_plot_FoldChange_KO_vs_HZ_Heart.pdf")
-
-```
-
-
-
-
-
-comparing Z linked targets vs autosomal targets 
-
-```{r}
-perform_wilcox_test <- function(df) {
-  # Filter the dataframe for Z_linked targets
-  z_linked_targets <- df$log2FoldChange[df$chr_z_or_auto == "Z_linked" & df$mir_targets_6_8 == "target"]
-  
-  # Filter the dataframe for Autosomal targets
-  autosomal_targets <- df$log2FoldChange[df$chr_z_or_auto == "Autosomal" & df$mir_targets_6_8 == "target"]
-  
-  # Calculate and print the median for Z_linked targets
-  median_z_linked <- median(z_linked_targets, na.rm = TRUE)
-  cat("Median for Z_linked targets:", median_z_linked, "\n")
-  
-  # Calculate and print the median for Autosomal targets
-  median_autosomal <- median(autosomal_targets, na.rm = TRUE)
-  cat("Median for Autosomal targets:", median_autosomal, "\n")
-  
-  # Run the Wilcoxon test
-  result <- wilcox.test(z_linked_targets, autosomal_targets)
-  
-  return(str(result))
-}
-
-perform_wilcox_test(result_whole)
-perform_wilcox_test(result_head)
-perform_wilcox_test(result_heart)
-perform_wilcox_test(result_body)
-
-
-
-```
-
-
-Volcano plots
-
-```{r fig.width= 15, fig.height = 15}
-
-
-generate_vol_plot_and_save <- function(data, plot_title, output_filename) {
-  vol_plot <- ggplot(data, aes(x = log2FoldChange, y = -log10(padj))) + 
-    geom_point(aes(fill = mir_targets_6_8), color = "black", size = 1, stroke = 0.01, shape = 21, alpha = 0.8) +
-    scale_size_manual(values = c(1)) +
-    scale_fill_manual(values = c("#DCE9F8", "#6664AB"), guide = guide_legend(title = "")) +
-    coord_cartesian(xlim = c(-3, 3), ylim = c(0, 50)) +
-    geom_hline(yintercept = -log10(0.05), linetype = "dashed") + 
-    labs(title = plot_title, 
-         x = "Log2(FC)", 
-         y = "-Log10(adj.P)") +
-    scale_x_continuous(limits = c(-3, 3), breaks = seq(-3, 3, 1)) +
-    scale_y_continuous(limits = c(0, 50), breaks = c(10,20,30,40,50)) + 
-    theme_classic() + my_theme
-  
-  # Print the plot
-  print(vol_plot)
-  
-ggsave(
-  plot = vol_plot,
-  filename = output_filename,
-  device = "tiff",
-  width = 4.2,
-  height = 4.2,
-  units = "cm",
-  dpi = 600,
-  bg = "transparent"
-)
-}
-  
-
-```
-Save volcano plots
-```{r}
-my_data <- result_head
-my_title <- "Head"
-output_filename <- "/home/amir/miR-2954/plots/PC_Volcano_all_genes_Head.tiff"
-generate_vol_plot_and_save(my_data, my_title, output_filename)
-
-my_data <- result_body
-my_title <- "Body"
-output_filename <- "/home/amir/miR-2954/plots/PC_Volcano_all_genes_Body.tiff"
-generate_vol_plot_and_save(my_data, my_title, output_filename)
-
-my_data <- result_heart
-my_title <- "Heart"
-output_filename <- "/home/amir/miR-2954/plots/PC_Volcano_all_genes_Heart.tiff"
-generate_vol_plot_and_save(my_data, my_title, output_filename)
-
-
-my_data <- result_whole
-my_title <- "Whole Embryo"
-output_filename <- "/home/amir/miR-2954/plots/PC_Volcano_all_genes_Whole_E.tiff"
-generate_vol_plot_and_save(my_data, my_title, output_filename)
-
-```
-
-
-Bar plot of enrichment 
-
-Categories genes
-
-```{r}
-
-
-get_category_summary <- function(df) {
-  summary <- df %>%
-    group_by(mir_targets_6_8, chr_z_or_auto) %>%
-    summarize(count_per_category = n(),
-              significant_count = sum(significant_genes == "significant"),
-              not_significant_count = sum(significant_genes == "not_significant")) %>%
-    mutate(proportion_per_category = 100 * significant_count / count_per_category)
-  
-  return(summary)
-}
-
-res_count_category <- get_category_summary(result_whole)
-res_count_category
-```
-
-Perform the chi-square test 
-```{r}
-autosomal_contingency_table  <- res_count_category %>% dplyr::filter (chr_z_or_auto == "Autosomal") %>% select (mir_targets_6_8, significant_count, not_significant_count) %>% column_to_rownames(var = "mir_targets_6_8")
-
-# Perform the chi-squared test
-autosomal_test_result <- chisq.test(autosomal_contingency_table)
-
-Z_linked_contingency_table  <- res_count_category %>% dplyr::filter (chr_z_or_auto == "Z_linked") %>% select (mir_targets_6_8, significant_count, not_significant_count) %>% column_to_rownames(var = "mir_targets_6_8")
-
-# Perform the chi-squared test
-Z_linked_test_result <- chisq.test(Z_linked_contingency_table)
-
-```
-
-
-```{r }
-
-# Extract the p-values from your test results
-autosomal_p_value <- autosomal_test_result$p.value
-z_linked_p_value <- Z_linked_test_result$p.value
-
-# Create the ggplot object
-p <- ggplot(res_count_category, aes(x = chr_z_or_auto, y = proportion_per_category, fill = mir_targets_6_8)) +
-  geom_bar(stat = "identity", position = position_dodge(), color = "black", size = 0.2) +
-  labs(x = "", y = "Percentage in DE") + 
-  ggtitle("Head") +
-  geom_text(aes(label = paste0(significant_count, "/","\n", count_per_category)), 
-            position = position_dodge(width = 0.9), 
-            vjust = -0.25,
-            size = 1.8) +
-  scale_y_continuous(limits = c(0, max(res_count_category$proportion_per_category) + 15)) +
-  theme_classic() +
-  scale_fill_brewer(palette = "Set1")
-
-# Add p-values to the plot (formatted using scientific notation)
-p <- p + annotate("text", x = 1, y = max(res_count_category$proportion_per_category) + 8, 
-                  label = paste0("", formatC(autosomal_p_value, format = "e", digits = 1)), 
-                  color = "black", size = 2)
-p <- p + annotate("text", x = 2, y = max(res_count_category$proportion_per_category) + 8, 
-                  label = paste0("", formatC(z_linked_p_value, format = "e", digits = 1)), 
-                  color = "black", size = 2)
-
-# Add a segment below the p-values
-p <- p + geom_segment(aes(x = 0.8, y = max(res_count_category$proportion_per_category) + 6, 
-                          xend = 1.2, yend = max(res_count_category$proportion_per_category) + 6), 
-                      size = 0.2)
-p <- p + geom_segment(aes(x = 1.8, y = max(res_count_category$proportion_per_category) + 6, 
-                          xend = 2.2, yend = max(res_count_category$proportion_per_category) + 6), 
-                      size = 0.2) + my_theme
-
-# Display the plot
-print(p)
-
-```
-
-```{r}
-plot_enrichment <- function(df, title, output_filename) {
-  get_category_summary <- function(df) {
-    summary <- df %>%
-      group_by(mir_targets_6_8, chr_z_or_auto) %>%
-      summarize(count_per_category = n(),
-                significant_count = sum(significant_genes == "significant"),
-                not_significant_count = sum(significant_genes == "not_significant")) %>%
-      mutate(proportion_per_category = 100 * significant_count / count_per_category)
-
-    return(summary)
-  }
-
-  res_count_category <- get_category_summary(df)
-
-  autosomal_contingency_table  <- res_count_category %>% dplyr::filter (chr_z_or_auto == "Autosomal") %>% select (mir_targets_6_8, significant_count, not_significant_count) %>% column_to_rownames(var = "mir_targets_6_8")
-  autosomal_test_result <- chisq.test(autosomal_contingency_table)
-
-  Z_linked_contingency_table  <- res_count_category %>% dplyr::filter (chr_z_or_auto == "Z_linked") %>% select (mir_targets_6_8, significant_count, not_significant_count) %>% column_to_rownames(var = "mir_targets_6_8")
-  Z_linked_test_result <- chisq.test(Z_linked_contingency_table)
-
-  autosomal_p_value <- autosomal_test_result$p.value
-  z_linked_p_value <- Z_linked_test_result$p.value
-
-  p <- ggplot(res_count_category, aes(x = chr_z_or_auto, y = proportion_per_category, fill = mir_targets_6_8)) +
-    geom_bar(stat = "identity", position = position_dodge(), color = "black", size = 0.2) +
-    labs(x = "", y = "Percentage in DE") + 
-    geom_text(aes(label = paste0(significant_count, "/","\n", count_per_category), y = 6), 
-              position = position_dodge(width = 0.9), 
-              vjust = -0.25,
-              size = 2) +
-    scale_fill_manual(values = c("target" = "#6664AB", "not_target" = "#DCE9F8"),
-                      name = "", 
-                      labels = c("target" = "Target", 
-                                 "not_target" = "Not_target")) +
-    scale_x_discrete(labels = c("Autosomal" = "Autosomal", "Z_linked" = "Z-linked")) +  # update here
-    scale_y_continuous(limits = c(0, max(res_count_category$proportion_per_category) + 15)) +
-    theme_classic() + my_theme +
-    ggtitle(title)  # add title
-  
-  
-  format_p_value <- function(p_value) {
-  p_value_scientific <- formatC(p_value, format = "e", digits = 1)
-  mantissa <- sub("e.*$", "", p_value_scientific)
-  exponent <- sub("^.*e", "", p_value_scientific)
-  exponent <- as.integer(exponent)
-  paste0(mantissa, " %*% 10^", exponent)  # Changed to a format that can be parsed
-}
-
- p <- p + annotate("text", x = 1, y = max(res_count_category$proportion_per_category) + 11, 
-                    label = format_p_value(autosomal_p_value), 
-                    color = "black", size = 2, parse = TRUE) # Added parse = TRUE
- p <- p + annotate("text", x = 2, y = max(res_count_category$proportion_per_category) + 11, 
-                    label = format_p_value(z_linked_p_value), 
-                    color = "black", size = 2, parse = TRUE) # Added parse = TRUE
-
-  p <- p + geom_segment(aes(x = 0.8, y = max(res_count_category$proportion_per_category) + 6, 
-                            xend = 1.2, yend = max(res_count_category$proportion_per_category) + 6), 
-                        size = 0.2)
-  p <- p + geom_segment(aes(x = 1.8, y = max(res_count_category$proportion_per_category) + 6, 
-                            xend = 2.2,  yend = max(res_count_category$proportion_per_category) + 6), 
-                        size = 0.2) #+ my_theme  # you might need to include your specific theme if needed
-
-  # Display the plot
-  print(p)
-  
-  ggsave(
-    plot = p,
-    filename = output_filename,
-    device = "pdf",
-    width = 4.2,
-    height =4.2,
-    units = "cm",
-    dpi = 300,
-    bg = "transparent",
-    useDingbats = FALSE)
-}
-
-```
-
-```{r}
-plot_enrichment(result_head, "Head", "/home/amir/miR-2954/plots/PC_Bar_DE_enrichment_Head.pdf")
-plot_enrichment(result_body, "Body", "/home/amir/miR-2954/plots/PC_Bar_DE_enrichment_Body.pdf")
-plot_enrichment(result_heart, "Heart", "/home/amir/miR-2954/plots/PC_Bar_DE_enrichment_Heart.pdf")
-plot_enrichment(result_whole, "Whole Embryo", "/home/amir/miR-2954/plots/PC_Bar_DE_enrichment_whole_Male.pdf")
-
-```
-
-
-Identify Experimental targets 
-
-
-`````{r}
-age <- c(3, 5)  # ages
-sex <- "Male"  # sex
-formula_design <- "~ genotype + embryonic_age"  # design formula
-contrast_values <- c("genotype", "KO", "WT")  # contrast values
-
-result_head <- analyze_samples_age_cov(protein_coding_DeSeq2, age, sex, tissue = "Head", formula_design, contrast_values)
-result_body <- analyze_samples_age_cov(protein_coding_DeSeq2 , age, sex, tissue = "Body", formula_design, contrast_values)
-result_heart <- analyze_samples_age_cov(protein_coding_DeSeq2 , age, sex, tissue = "Heart", formula_design, contrast_values)
-
-age <- c(2)  # ages
-sex <- "Male"  # sex
-formula_design <- "~ genotype"  # design formula
-contrast_values <- c("genotype", "KO", "WT")  # contrast values
-result_whole <- analyze_samples_age_cov(protein_coding_DeSeq2 , age, sex, tissue = "Whole", formula_design, contrast_values)
-
-# Identify significant genes for each Tissue
-
-sig_head <-  result_head %>% filter(padj <= 0.05) %>% select (gene_id, mir_target_group)
-sig_body <-  result_body %>% filter(padj <= 0.05)  %>% select (gene_id,mir_target_group)
-sig_heart <- result_heart %>% filter(padj <= 0.05)  %>% select (gene_id, mir_target_group)
-sig_whole <- result_whole %>% filter(padj <= 0.05)  %>% select (gene_id, mir_target_group)
-
-
-# Identify Subset of Z-linked Target genes for each Tissue
-
-sig_head_group <- sig_head[sig_head$mir_target_group == "Z_linked_target", ]$gene_id
-sig_body_group <- sig_body[sig_body$mir_target_group == "Z_linked_target", ]$gene_id
-sig_heart_group <- sig_heart[sig_heart$mir_target_group == "Z_linked_target", ]$gene_id
-sig_whole_group <- sig_whole[sig_whole$mir_target_group == "Z_linked_target", ]$gene_id
-
-
-
-combined_genes <- unique(c(sig_head_group, sig_body_group, sig_heart_group, sig_whole_group))
-
-combined_genes
-
-Save Experimental targets
-saveRDS(combined_genes,"~/miR-2954/results/mir_2954_ExpTargets_PadjAll_0.05.rds")
-
-
-```
-
-
-```{r}
-# Load necessary library
-library(eulerr)
-
-# Filter data for "Z_linked_target" group
-sig_head_group <- sig_head[sig_head$mir_target_group == "Z_linked_target", ]
-sig_body_group <- sig_body[sig_body$mir_target_group == "Z_linked_target", ]
-sig_heart_group <- sig_heart[sig_heart$mir_target_group == "Z_linked_target", ]
-
-# Extract gene_id columns as lists
-head_genes_group <- sig_head_group$gene_id
-body_genes_group <- sig_body_group$gene_id
-heart_genes_group <- sig_heart_group$gene_id
-
-# Create a named list for euler diagram
-input_group <- list(
-  "Head" = head_genes_group,
-  "Body" = body_genes_group,
-  "Heart" = heart_genes_group
-)
-
-
-# Calculate overlaps
-overlaps <- euler(input_group)
-
-
-# Plot the diagram with a title and quantities
-plot(overlaps, main = "Z_linked_target", quantities = TRUE)
-
-```
-
-
-
-
-
-#Figure 1 | Overlap of significantly expressed genes in different tissues for a specific miRNA target group. The Euler diagram illustrates the overlap of significantly expressed genes (padj ≤ 0.05) between head, body, and heart tissues, specifically for the miRNA target group "Z_linked_target". Each circle represents a tissue type with the total number of significant genes labelled within. Overlapping regions indicate shared significant genes between tissues, with the number of shared genes indicated within each overlap. This figure demonstrates the tissue-specific and shared gene expression patterns within a specific miRNA target group.
-
-```{r}
-
-calculate_and_plot_group <- function(plot_title, target_group, result_head, result_body, result_heart) {
-  
-  # Filter data based on padj and select specific columns
-  sig_head <-  result_head %>% filter(padj <= 0.05) %>% select (gene_id, mir_target_group)
-  sig_body <-  result_body %>% filter(padj <= 0.05)  %>% select (gene_id, mir_target_group)
-  sig_heart <- result_heart %>% filter(padj <= 0.05)  %>% select (gene_id, mir_target_group)
-  
-
-  # Filter data for the target group
-  sig_head_group <- sig_head[sig_head$mir_target_group == target_group, ]
-  sig_body_group <- sig_body[sig_body$mir_target_group == target_group, ]
-  sig_heart_group <- sig_heart[sig_heart$mir_target_group == target_group, ]
-  
-  total_genes_group <- length(unique(c(sig_head_group$gene_id, sig_body_group$gene_id, sig_heart_group$gene_id)))
-  print(paste("Total number of unique genes in the target group: ", total_genes_group))
-  
-
-  # Extract gene_id columns as lists
-  head_genes_group <- sig_head_group$gene_id
-  body_genes_group <- sig_body_group$gene_id
-  heart_genes_group <- sig_heart_group$gene_id
-
-  # Create a named list for euler diagram
-  input_group <- list(
-    "Head" = head_genes_group,
-    "Body" = body_genes_group,
-    "Heart" = heart_genes_group
-  )
-
-  # Calculate overlaps
-  overlaps <- euler(input_group)
-
-
-  col <- c("#F5C603", "#FF6F61", "#6664AB")
-
-  # Specify the PDF file name
-  file_name <- paste(target_group, ".pdf", sep="")
-
-
-  plot(overlaps, main = plot_title, 
-     quantities = list(cex = 0.5), # half the font size of the numbers
-     scale = 0.5, # half the size of the circles
-     shape = list(col = "black", lty = 1, lwd = 0.5),
-     legend = TRUE, side = "top",
-     fill = list(fill = col, alpha = 0.8)
-     )
-}
-
-calculate_and_plot_group (plot_title = "Z-linked target" , "Z_linked_target", result_head, result_body, result_heart)
-calculate_and_plot_group (plot_title = "Z-linked target" , "Autosomal_target", result_head, result_body, result_heart)
-
-```
-
-
-
-```{r}
-
-# Open the PDF device
-pdf(file="/home/amir/miR-2954/plots/Euler_Z_linked_targets.pdf", width=2, height=1.5)
-calculate_and_plot_group (plot_title= "Z-linked target","Z_linked_target", result_head, result_body, result_heart)
-dev.off()
-
-# Open the PDF device
-pdf(file="/home/amir/miR-2954/plots/Euler_Z_linked_not_targets.pdf", width=2, height=1.5)
-calculate_and_plot_group (plot_title= "Z-linked not-target","Z_linked_not_target", result_head, result_body, result_heart)
-dev.off()
-
-# Open the PDF device
-pdf(file="/home/amir/miR-2954/plots/Euler_Autosomal_not_targets.pdf", width=2, height=1.5)
-calculate_and_plot_group (plot_title= "Autosomal not-target","Autosomal_not_target", result_head, result_body, result_heart)
-dev.off()
-
-# Open the PDF device
-pdf(file="/home/amir/miR-2954/plots/Euler_Autosomal_targets.pdf", width=2, height=1.5)
-calculate_and_plot_group (plot_title= "Autosomal target","Autosomal_target", result_head, result_body, result_heart)
-dev.off()
-
-
-
-```
-
-
-
-```{r fig.width = 10}
-
-# load necessary libraries
-library(dplyr)
-library(tidyr)
-library(UpSetR)
-
-# Define the levels of mir_target_group
-groups <- unique(c(sig_head$mir_target_group, sig_body$mir_target_group, sig_heart$mir_target_group))
-groups
-
-# Initialize an empty data frame
-df <- data.frame()
-
-# Loop over the groups
-for (group in groups) {
-  
-  # Filter data for each group
-  sig_head_group <- sig_head[sig_head$mir_target_group == group, "gene_id"]
-  sig_body_group <- sig_body[sig_body$mir_target_group == group, "gene_id"]
-  sig_heart_group <- sig_heart[sig_heart$mir_target_group == group, "gene_id"]
-  
-  # Create data frame for each group
-  temp_df <- data.frame(
-    gene_id = unique(c(sig_head_group, sig_body_group, sig_heart_group)),
-    stringsAsFactors = FALSE
-  )
-  
-  temp_df$Head <- temp_df$gene_id %in% sig_head_group
-  temp_df$Body <- temp_df$gene_id %in% sig_body_group
-  temp_df$Heart <- temp_df$gene_id %in% sig_heart_group
-  temp_df$group = group
-  
-  # Bind the temporary data frame to the main one
-  df <- rbind(df, temp_df)
-}
-
-# Convert the data to long format
-df_long <- df %>%
-  gather("set", "value", -gene_id, -group) %>%
-  filter(value)
-
-# Create a list of gene sets
-sets <- split(df_long$gene_id, df_long$set)
-
-
-# Plot with UpSetR
-upset(fromList(sets))
-
-
-```
